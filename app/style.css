@@ -7,3 +7,11 @@
 .platform-logout{margin-left:auto;background:white;color:#344054;border:1px solid #d0d5dd;padding:11px 16px}
 .platform-tab:focus-visible,.platform-logout:focus-visible{outline:3px solid #2563eb;outline-offset:2px}
 @media(max-width:640px){.platform-nav{flex-wrap:wrap}.platform-tab{flex:1;padding:12px 8px}.platform-logout{margin-left:0;width:100%}}
+
+/* Seletor de lojas multicanal */
+.store-switch{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.store-switch label{font-size:13px;font-weight:700;color:#344054}
+.store-switch select{min-width:195px;max-width:100%;border:1px solid #cbd5e1;background:#fff;border-radius:9px;padding:10px 12px;color:#1d2939;font:inherit;cursor:pointer}
+.store-switch select:focus-visible{outline:3px solid #2563eb;outline-offset:2px}
+.store-switch small{font-size:12px}
+@media(max-width:800px){.store-switch{width:100%}.store-switch select{flex:1;min-width:130px}}
