@@ -27,8 +27,11 @@ export async function GET(req,{params}){const {action}=await params;
     const gross=o.gross_amount===null?null:Number(o.gross_amount);
     const fee=o.sale_fees===null?null:Number(o.sale_fees);
     const preview=gross!==null&&Number.isFinite(gross)&&fee!==null&&Number.isFinite(fee)?Math.round((gross-fee)*100)/100:null;
+    const shipping=raw.__concilia_shipping;
+    const shippingCost=shipping?.status==='ok'&&Number.isFinite(Number(shipping.cost))?Number(shipping.cost):null;
+    const netAfterShipping=preview!==null&&shippingCost!==null?Math.round((preview-shippingCost)*100)/100:null;
     const {raw:ignored,...publicOrder}=o;
-    return {...publicOrder,estimated_net:preview,net_basis:preview===null?'indisponivel':'somente_tarifas_de_venda',payment_net_reference:paymentNet};
+    return {...publicOrder,estimated_net:preview,shipping_cost:shippingCost,net_after_shipping:netAfterShipping,shipping_status:shipping?.status||'pendente',net_basis:netAfterShipping===null?'incompleto':'venda_menos_tarifa_e_frete',payment_net_reference:paymentNet};
    });
    return Response.json({orders:rows,totalStored:count??rows.length});
   }
@@ -40,6 +43,33 @@ export async function POST(req,{params}){const {action}=await params;if(!await a
   if(action==='start'){const cfg=config(),verifier=crypto.randomBytes(48).toString('base64url'),challenge=crypto.createHash('sha256').update(verifier).digest('base64url'),state=crypto.randomBytes(32).toString('hex');
    await checked(db().from('meli_oauth_states').insert({state_hash:hash(state),verifier_cipher:seal(verifier),expires_at:new Date(Date.now()+600000).toISOString()}));
    const url=new URL('https://auth.mercadolivre.com.br/authorization');for(const [k,v] of Object.entries({response_type:'code',client_id:cfg.id,redirect_uri:cfg.redirect,state,code_challenge:challenge,code_challenge_method:'S256'}))url.searchParams.set(k,v);return Response.json({url:url.toString()})}
+  if(action==='shipping'){
+   const c=await validConnection();
+   const body=await req.json().catch(()=>({})),offset=Number(body.offset??0);
+   if(!Number.isInteger(offset)||offset<0||offset>=10000)return Response.json({error:'Offset inválido'},{status:400});
+   // Lotes pequenos evitam timeout e permitem apresentar progresso.
+   const orders=await checked(db().from('meli_orders').select('order_id,seller_id,raw').eq('seller_id',c.seller_id).order('created_at',{ascending:false}).order('order_id',{ascending:false}).range(offset,offset+14));
+   const results=[];let updated=0,missing=0,failed=0;
+   for(const o of orders){
+    const raw=o.raw||{},shippingId=raw.shipping?.id;
+    let shipping;
+    if(!shippingId){shipping={status:'sem_id',cost:null,checked_at:new Date().toISOString()};missing++}
+    else try{
+     const r=await fetch('https://api.mercadolibre.com/shipments/'+encodeURIComponent(String(shippingId))+'/costs',{headers:{Authorization:'Bearer '+c.accessToken,'x-format-new':'true'},cache:'no-store'});
+     if(r.status===429)throw Error('Limite de consultas da API atingido (429). Tente novamente mais tarde.');
+     if(!r.ok){shipping={status:'indisponivel',cost:null,http_status:r.status,checked_at:new Date().toISOString()};failed++}
+     else{
+      const data=await r.json(),sender=(data.senders||[]).find(x=>String(x.user_id)===String(c.seller_id));
+      if(sender&&sender.cost!==null&&sender.cost!==undefined&&Number.isFinite(Number(sender.cost))){
+       shipping={status:'ok',cost:Number(sender.cost),shipment_id:String(shippingId),checked_at:new Date().toISOString()};updated++;
+      }else{shipping={status:'sem_custo_vendedor',cost:null,checked_at:new Date().toISOString()};missing++}
+     }
+    }catch(e){if(e.message.includes('429'))throw e;shipping={status:'erro',cost:null,checked_at:new Date().toISOString()};failed++}
+    await checked(db().from('meli_orders').update({raw:{...raw,__concilia_shipping:shipping}}).eq('seller_id',c.seller_id).eq('order_id',o.order_id));
+    results.push({order_id:o.order_id,status:shipping.status});
+   }
+   return Response.json({processed:orders.length,updated,missing,failed,offset:offset+orders.length,complete:orders.length<15,notice:'Frete consultado; ajustes financeiros extras e liberações não verificados'});
+  }
   if(action==='sync'){
    const c=await validConnection();
    const body=await req.json().catch(()=>({}));
@@ -58,7 +88,13 @@ export async function POST(req,{params}){const {action}=await params;if(!await a
      const results=response.results||[];
      if(Number.isFinite(Number(response.paging?.total)))total=Number(response.paging.total);
      if(results.length){
-      await checked(db().from('meli_orders').upsert(results.map(o=>({...normalize(o),seller_id:c.seller_id})),{onConflict:'seller_id,order_id'}));
+      const ids=results.map(o=>String(o.id));
+      const existing=await checked(db().from('meli_orders').select('order_id,raw').eq('seller_id',c.seller_id).in('order_id',ids));
+      const oldMap=new Map((existing||[]).map(o=>[o.order_id,o.raw?.__concilia_shipping]));
+      await checked(db().from('meli_orders').upsert(results.map(o=>{
+       const row=normalize(o),previous=oldMap.get(row.order_id);
+       return {...row,seller_id:c.seller_id,raw:previous?{...o,__concilia_shipping:previous}:o};
+      }),{onConflict:'seller_id,order_id'}));
       processed+=results.length;
      }
      current+=results.length;
