@@ -17,7 +17,21 @@ export async function GET(req,{params}){const {action}=await params;
  }
  try{if(!await admin(req))return Response.json({error:'Não autorizado'},{status:401});
   if(action==='status'){const c=await connection();return Response.json({connected:!!c,seller_id:c?.seller_id??null,credentialsConfigured:!!(process.env.MELI_CLIENT_ID&&process.env.MELI_CLIENT_SECRET&&process.env.MELI_REDIRECT_URI&&process.env.TOKEN_ENCRYPTION_KEY)})}
-  if(action==='orders'){const orders=await checked(db().from('meli_orders').select('order_id,status,created_at,gross_amount,sale_fees,payment_status,payout_status').order('created_at',{ascending:false}).limit(500));const {count,error}=await db().from('meli_orders').select('id',{count:'exact',head:true});if(error)throw Error(error.message);return Response.json({orders,totalStored:count??orders.length})}
+  if(action==='orders'){
+   const orders=await checked(db().from('meli_orders').select('order_id,status,created_at,gross_amount,sale_fees,payment_status,payout_status,raw').order('created_at',{ascending:false}).limit(500));
+   const {count,error}=await db().from('meli_orders').select('id',{count:'exact',head:true});if(error)throw Error(error.message);
+   const rows=orders.map(o=>{
+    const raw=o.raw||{}, payments=Array.isArray(raw.payments)?raw.payments:[];
+    const paymentNet=payments.length&&payments.every(p=>Number.isFinite(Number(p.transaction_details?.net_received_amount))&&p.transaction_details?.net_received_amount!==null)
+      ?payments.reduce((s,p)=>s+Number(p.transaction_details.net_received_amount),0):null;
+    const gross=o.gross_amount===null?null:Number(o.gross_amount);
+    const fee=o.sale_fees===null?null:Number(o.sale_fees);
+    const preview=gross!==null&&Number.isFinite(gross)&&fee!==null&&Number.isFinite(fee)?Math.round((gross-fee)*100)/100:null;
+    const {raw:ignored,...publicOrder}=o;
+    return {...publicOrder,estimated_net:preview,net_basis:preview===null?'indisponivel':'somente_tarifas_de_venda',payment_net_reference:paymentNet};
+   });
+   return Response.json({orders:rows,totalStored:count??rows.length});
+  }
   return Response.json({error:'Rota não encontrada'},{status:404});
  }catch(e){return errorResponse(e)}
 }
