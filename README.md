@@ -19,3 +19,13 @@ As tabelas usam RLS sem permissões públicas. O servidor usa chave service role
 Para consultar pagamentos de sua própria conta vendedora, obtenha o Access Token de **produção** no painel Mercado Pago Developers, na aplicação específica do Mercado Pago. Cadastre-o somente na Vercel como variável **Secret** `MP_ACCESS_TOKEN`, em Production, e publique novo deploy. Não compartilhe nem comite o token. O aplicativo Mercado Livre e o aplicativo Mercado Pago são separados.
 
 No painel use `Conferir Mercado Pago`: consulta em lotes de 10 os IDs de pagamentos já vinculados aos pedidos do Mercado Livre. A API pode não disponibilizar todos os pagamentos com o token informado; nessa situação os valores permanecem pendentes, sem estimativa de repasse. `net_received_amount` pertence ao pagamento e pode diferir do valor líquido de venda devido a frete/ajustes; `money_release_date` é uma data de liberação, não comprovante de saque para conta bancária. Para conciliação definitiva, adicionar os Relatórios de Liberações/Dinheiro em conta do Mercado Pago.
+
+## Integração Shopee (aguardando Go-Live)
+
+1. No SQL Editor do projeto Supabase conectado à Vercel, execute `supabase/shopee.sql`. Este script só cria tabelas Shopee, sem modificar Mercado Livre.
+2. Aguarde a Shopee aprovar a solicitação Go-Live e disponibilizar o **Live Partner ID** e **Live Partner Key** (não use as credenciais de teste no ambiente de produção).
+3. Configure em **Vercel → Settings → Environment Variables → Production** as variáveis secretas `SHOPEE_PARTNER_ID`, `SHOPEE_PARTNER_KEY` e a configuração `SHOPEE_REDIRECT_URI=https://shopee-conciliador-2.vercel.app/api/shopee/callback`. O domínio deve ser aquele cadastrado como Live Redirect URL Domain na Shopee.
+4. Faça novo deploy e, no Concilia, clique em **Conectar Shopee**, autorize a loja e depois clique em **Importar 7 dias** e **Conferir valores Shopee**.
+5. A consulta usa HMAC-SHA256, nonce em cookie HttpOnly e estado temporário no banco. Os tokens ficam criptografados no Supabase com `TOKEN_ENCRYPTION_KEY` (já usado pelo Mercado Livre). A API não divulga os tokens ao navegador.
+
+**Limitações:** a importação inicial busca até 100 páginas de 50 pedidos em sete dias; o painel mostra 100 registros recentes. A API Payment retorna `escrow_amount` (recebimento esperado) e, quando presente, `escrow_amount_after_adjustment`; valores podem mudar até a conclusão, e não comprovam transferência bancária. Para conciliação de recebidos, será necessário comparar com as liberações/extratos da Shopee. A integração ainda não foi testada com credenciais Live.
