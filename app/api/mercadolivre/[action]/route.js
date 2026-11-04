@@ -16,10 +16,13 @@ export async function GET(req,{params}){const {action}=await params;
   }catch(e){return dest('erro_autorizacao')}
  }
  try{if(!await admin(req))return Response.json({error:'Não autorizado'},{status:401});
-  if(action==='status'){const c=await connection();return Response.json({connected:!!c,seller_id:c?.seller_id??null,credentialsConfigured:!!(process.env.MELI_CLIENT_ID&&process.env.MELI_CLIENT_SECRET&&process.env.MELI_REDIRECT_URI&&process.env.TOKEN_ENCRYPTION_KEY),mercadoPagoConfigured:!!process.env.MP_ACCESS_TOKEN})}
+  if(action==='status'){const stores=await checked(db().from('meli_connections').select('seller_id,connected_at').order('connected_at',{ascending:true}));return Response.json({connected:stores.length>0,stores,credentialsConfigured:!!(process.env.MELI_CLIENT_ID&&process.env.MELI_CLIENT_SECRET&&process.env.MELI_REDIRECT_URI&&process.env.TOKEN_ENCRYPTION_KEY),mercadoPagoConfigured:!!process.env.MP_ACCESS_TOKEN})}
   if(action==='orders'){
-   const orders=await checked(db().from('meli_orders').select('order_id,status,created_at,gross_amount,sale_fees,payment_status,payout_status,raw').order('created_at',{ascending:false}).limit(500));
-   const {count,error}=await db().from('meli_orders').select('id',{count:'exact',head:true});if(error)throw Error(error.message);
+   const sellerId=new URL(req.url).searchParams.get('seller_id');
+   if(!/^[0-9]+$/.test(sellerId||''))return Response.json({error:'Selecione uma conta Mercado Livre'},{status:400});
+   if(!await connection(sellerId))return Response.json({error:'Conta Mercado Livre não vinculada'},{status:404});
+   const orders=await checked(db().from('meli_orders').select('order_id,status,created_at,gross_amount,sale_fees,payment_status,payout_status,raw').eq('seller_id',sellerId).order('created_at',{ascending:false}).limit(500));
+   const {count,error}=await db().from('meli_orders').select('id',{count:'exact',head:true}).eq('seller_id',sellerId);if(error)throw Error(error.message);
    const rows=orders.map(o=>{
     const raw=o.raw||{}, payments=Array.isArray(raw.payments)?raw.payments:[];
     const paymentNet=payments.length&&payments.every(p=>Number.isFinite(Number(p.transaction_details?.net_received_amount))&&p.transaction_details?.net_received_amount!==null)
@@ -45,10 +48,11 @@ export async function POST(req,{params}){const {action}=await params;if(!await a
    await checked(db().from('meli_oauth_states').insert({state_hash:hash(state),verifier_cipher:seal(verifier),expires_at:new Date(Date.now()+600000).toISOString()}));
    const url=new URL('https://auth.mercadolivre.com.br/authorization');for(const [k,v] of Object.entries({response_type:'code',client_id:cfg.id,redirect_uri:cfg.redirect,state,code_challenge:challenge,code_challenge_method:'S256'}))url.searchParams.set(k,v);return Response.json({url:url.toString()})}
   if(action==='mercadopago'){
-   const c=await validConnection();
+   const body=await req.json().catch(()=>({}));
+   const c=await validConnection(body.seller_id);
    const token=process.env.MP_ACCESS_TOKEN?.trim();
    if(!token)return Response.json({error:'Cadastre MP_ACCESS_TOKEN (produção) como Secret na Vercel para consultar pagamentos.'},{status:400});
-   const body=await req.json().catch(()=>({})),offset=Number(body.offset??0);
+   const offset=Number(body.offset??0);
    if(!Number.isInteger(offset)||offset<0||offset>=10000)return Response.json({error:'Offset inválido'},{status:400});
    // Consulta controlada de 10 pedidos para evitar bloqueio e timeout.
    const orders=await checked(db().from('meli_orders').select('order_id,seller_id,raw').eq('seller_id',c.seller_id).order('created_at',{ascending:false}).order('order_id',{ascending:false}).range(offset,offset+9));
@@ -85,8 +89,8 @@ export async function POST(req,{params}){const {action}=await params;if(!await a
    return Response.json({processed:orders.length,confirmed,partial,unavailable,offset:offset+orders.length,complete:orders.length<10,notice:'Valor do pagamento Mercado Pago não comprova saque bancário; podem existir ajustes posteriores'});
   }
   if(action==='shipping'){
-   const c=await validConnection();
-   const body=await req.json().catch(()=>({})),offset=Number(body.offset??0);
+   const body=await req.json().catch(()=>({}));
+   const c=await validConnection(body.seller_id);const offset=Number(body.offset??0);
    if(!Number.isInteger(offset)||offset<0||offset>=10000)return Response.json({error:'Offset inválido'},{status:400});
    // Lotes pequenos evitam timeout e permitem apresentar progresso.
    const orders=await checked(db().from('meli_orders').select('order_id,seller_id,raw').eq('seller_id',c.seller_id).order('created_at',{ascending:false}).order('order_id',{ascending:false}).range(offset,offset+14));
@@ -112,8 +116,8 @@ export async function POST(req,{params}){const {action}=await params;if(!await a
    return Response.json({processed:orders.length,updated,missing,failed,offset:offset+orders.length,complete:orders.length<15,notice:'Frete consultado; ajustes financeiros extras e liberações não verificados'});
   }
   if(action==='sync'){
-   const c=await validConnection();
    const body=await req.json().catch(()=>({}));
+   const c=await validConnection(body.seller_id);
    const offset=Number(body.offset??0);
    const from=body.from;
    if(!Number.isInteger(offset)||offset<0||offset>=10000)return Response.json({error:'Offset inválido ou limite de paginação alcançado. Para volumes maiores, será necessário dividir por período.'},{status:400});
