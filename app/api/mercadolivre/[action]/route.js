@@ -17,7 +17,7 @@ export async function GET(req,{params}){const {action}=await params;
  }
  try{if(!await admin(req))return Response.json({error:'Não autorizado'},{status:401});
   if(action==='status'){const c=await connection();return Response.json({connected:!!c,seller_id:c?.seller_id??null,credentialsConfigured:!!(process.env.MELI_CLIENT_ID&&process.env.MELI_CLIENT_SECRET&&process.env.MELI_REDIRECT_URI&&process.env.TOKEN_ENCRYPTION_KEY)})}
-  if(action==='orders'){const orders=await checked(db().from('meli_orders').select('order_id,status,created_at,gross_amount,sale_fees,payment_status,payout_status').order('created_at',{ascending:false}).limit(500));return Response.json({orders})}
+  if(action==='orders'){const orders=await checked(db().from('meli_orders').select('order_id,status,created_at,gross_amount,sale_fees,payment_status,payout_status').order('created_at',{ascending:false}).limit(500));const {count,error}=await db().from('meli_orders').select('id',{count:'exact',head:true});if(error)throw Error(error.message);return Response.json({orders,totalStored:count??orders.length})}
   return Response.json({error:'Rota não encontrada'},{status:404});
  }catch(e){return errorResponse(e)}
 }
