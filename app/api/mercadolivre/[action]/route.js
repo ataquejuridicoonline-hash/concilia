@@ -61,7 +61,7 @@ export async function POST(req,{params}){const {action}=await params;if(!await a
      let amounts=[],details=[],inaccessible=false;
      for(const id of ids){
       // Permitir somente IDs numéricos, nunca URL remota.
-      if(!/^\\d+$/.test(id)){inaccessible=true;continue}
+      if(!/^[0-9]+$/.test(id)){inaccessible=true;continue}
       const response=await fetch('https://api.mercadopago.com/v1/payments/'+encodeURIComponent(id),{headers:{Authorization:'Bearer '+token},cache:'no-store'});
       if(response.status===429)throw Error('Mercado Pago limitou as consultas (HTTP 429). Tente mais tarde.');
       if(response.status===401||response.status===403)throw Error('Credencial Mercado Pago sem acesso (HTTP '+response.status+'). Confira o Access Token de produção da conta vendedora.');
