@@ -26,10 +26,38 @@ export async function POST(req,{params}){const {action}=await params;if(!await a
   if(action==='start'){const cfg=config(),verifier=crypto.randomBytes(48).toString('base64url'),challenge=crypto.createHash('sha256').update(verifier).digest('base64url'),state=crypto.randomBytes(32).toString('hex');
    await checked(db().from('meli_oauth_states').insert({state_hash:hash(state),verifier_cipher:seal(verifier),expires_at:new Date(Date.now()+600000).toISOString()}));
    const url=new URL('https://auth.mercadolivre.com.br/authorization');for(const [k,v] of Object.entries({response_type:'code',client_id:cfg.id,redirect_uri:cfg.redirect,state,code_challenge:challenge,code_challenge_method:'S256'}))url.searchParams.set(k,v);return Response.json({url:url.toString()})}
-  if(action==='sync'){const c=await validConnection();const inserted=await checked(db().from('meli_sync_runs').insert({seller_id:c.seller_id,status:'running'}).select('id').single());const run=inserted.id;try{let processed=0,from=new Date(Date.now()-7*86400000).toISOString();
-   for(let offset=0;offset<200;offset+=50){const qs=new URLSearchParams({seller:String(c.seller_id),limit:'50',offset:String(offset),'order.date_created.from':from,sort:'date_desc'});const results=(await meli('/orders/search?'+qs,c.accessToken)).results||[];if(!results.length)break;await checked(db().from('meli_orders').upsert(results.map(o=>({...normalize(o),seller_id:c.seller_id})),{onConflict:'seller_id,order_id'}));processed+=results.length;if(results.length<50)break}
-   await checked(db().from('meli_sync_runs').update({status:'ok',processed,finished_at:new Date().toISOString()}).eq('id',run));return Response.json({processed,notice:'Liberação financeira não verificada'})
-  }catch(e){await db().from('meli_sync_runs').update({status:'erro',error_message:e.message.slice(0,300),finished_at:new Date().toISOString()}).eq('id',run);throw e}}
+  if(action==='sync'){
+   const c=await validConnection();
+   const body=await req.json().catch(()=>({}));
+   const offset=Number(body.offset??0);
+   const from=body.from;
+   if(!Number.isInteger(offset)||offset<0||offset>=10000)return Response.json({error:'Offset inválido ou limite de paginação alcançado. Para volumes maiores, será necessário dividir por período.'},{status:400});
+   if(typeof from!=='string'||!Number.isFinite(Date.parse(from))||Date.now()-Date.parse(from)>8*86400000||Date.parse(from)>Date.now())return Response.json({error:'Data inicial inválida'},{status:400});
+   const inserted=await checked(db().from('meli_sync_runs').insert({seller_id:c.seller_id,status:'running'}).select('id').single());
+   const run=inserted.id;
+   try{
+    let processed=0,current=offset,total=null,complete=false;
+    // Até quatro páginas por requisição para reduzir risco de timeout na Vercel.
+    for(let page=0;page<4;page++){
+     const qs=new URLSearchParams({seller:String(c.seller_id),limit:'50',offset:String(current),'order.date_created.from':from,sort:'date_desc'});
+     const response=await meli('/orders/search?'+qs,c.accessToken);
+     const results=response.results||[];
+     if(Number.isFinite(Number(response.paging?.total)))total=Number(response.paging.total);
+     if(results.length){
+      await checked(db().from('meli_orders').upsert(results.map(o=>({...normalize(o),seller_id:c.seller_id})),{onConflict:'seller_id,order_id'}));
+      processed+=results.length;
+     }
+     current+=results.length;
+     if(results.length<50||(total!==null&&current>=total)){complete=true;break}
+     if(current>=10000)break;
+    }
+    await checked(db().from('meli_sync_runs').update({status:'ok',processed,finished_at:new Date().toISOString()}).eq('id',run));
+    return Response.json({processed,total,offset:current,complete,limitReached:!complete&&current>=10000,notice:'Liberação financeira não verificada'});
+   }catch(e){
+    await db().from('meli_sync_runs').update({status:'erro',error_message:e.message.slice(0,300),finished_at:new Date().toISOString()}).eq('id',run);
+    throw e;
+   }
+  }
   return Response.json({error:'Rota não encontrada'},{status:404})
  }catch(e){return errorResponse(e)}
 }
