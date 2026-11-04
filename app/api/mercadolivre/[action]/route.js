@@ -16,7 +16,7 @@ export async function GET(req,{params}){const {action}=await params;
   }catch(e){return dest('erro_autorizacao')}
  }
  try{if(!await admin(req))return Response.json({error:'Não autorizado'},{status:401});
-  if(action==='status'){const c=await connection();return Response.json({connected:!!c,seller_id:c?.seller_id??null,credentialsConfigured:!!(process.env.MELI_CLIENT_ID&&process.env.MELI_CLIENT_SECRET&&process.env.MELI_REDIRECT_URI&&process.env.TOKEN_ENCRYPTION_KEY)})}
+  if(action==='status'){const c=await connection();return Response.json({connected:!!c,seller_id:c?.seller_id??null,credentialsConfigured:!!(process.env.MELI_CLIENT_ID&&process.env.MELI_CLIENT_SECRET&&process.env.MELI_REDIRECT_URI&&process.env.TOKEN_ENCRYPTION_KEY),mercadoPagoConfigured:!!process.env.MP_ACCESS_TOKEN})}
   if(action==='orders'){
    const orders=await checked(db().from('meli_orders').select('order_id,status,created_at,gross_amount,sale_fees,payment_status,payout_status,raw').order('created_at',{ascending:false}).limit(500));
    const {count,error}=await db().from('meli_orders').select('id',{count:'exact',head:true});if(error)throw Error(error.message);
@@ -27,11 +27,12 @@ export async function GET(req,{params}){const {action}=await params;
     const gross=o.gross_amount===null?null:Number(o.gross_amount);
     const fee=o.sale_fees===null?null:Number(o.sale_fees);
     const preview=gross!==null&&Number.isFinite(gross)&&fee!==null&&Number.isFinite(fee)?Math.round((gross-fee)*100)/100:null;
+    const mp=raw.__concilia_mp;
     const shipping=raw.__concilia_shipping;
     const shippingCost=shipping?.status==='ok'&&Number.isFinite(Number(shipping.cost))?Number(shipping.cost):null;
     const netAfterShipping=preview!==null&&shippingCost!==null?Math.round((preview-shippingCost)*100)/100:null;
     const {raw:ignored,...publicOrder}=o;
-    return {...publicOrder,estimated_net:preview,shipping_cost:shippingCost,net_after_shipping:netAfterShipping,shipping_status:shipping?.status||'pendente',net_basis:netAfterShipping===null?'incompleto':'venda_menos_tarifa_e_frete',payment_net_reference:paymentNet};
+    return {...publicOrder,estimated_net:preview,shipping_cost:shippingCost,net_after_shipping:netAfterShipping,shipping_status:shipping?.status||'pendente',net_basis:netAfterShipping===null?'incompleto':'venda_menos_tarifa_e_frete',payment_net_reference:paymentNet,mp_status:mp?.status||'nao_consultado',mp_payment_status:mp?.payment_status||null,mp_net:mp?.net_amount??null,mp_release_date:mp?.release_date||null,mp_release_status:mp?.release_status||null,mp_payment_count:mp?.payment_count??null,mp_checked_at:mp?.checked_at||null};
    });
    return Response.json({orders:rows,totalStored:count??rows.length});
   }
@@ -43,6 +44,46 @@ export async function POST(req,{params}){const {action}=await params;if(!await a
   if(action==='start'){const cfg=config(),verifier=crypto.randomBytes(48).toString('base64url'),challenge=crypto.createHash('sha256').update(verifier).digest('base64url'),state=crypto.randomBytes(32).toString('hex');
    await checked(db().from('meli_oauth_states').insert({state_hash:hash(state),verifier_cipher:seal(verifier),expires_at:new Date(Date.now()+600000).toISOString()}));
    const url=new URL('https://auth.mercadolivre.com.br/authorization');for(const [k,v] of Object.entries({response_type:'code',client_id:cfg.id,redirect_uri:cfg.redirect,state,code_challenge:challenge,code_challenge_method:'S256'}))url.searchParams.set(k,v);return Response.json({url:url.toString()})}
+  if(action==='mercadopago'){
+   const c=await validConnection();
+   const token=process.env.MP_ACCESS_TOKEN?.trim();
+   if(!token)return Response.json({error:'Cadastre MP_ACCESS_TOKEN (produção) como Secret na Vercel para consultar pagamentos.'},{status:400});
+   const body=await req.json().catch(()=>({})),offset=Number(body.offset??0);
+   if(!Number.isInteger(offset)||offset<0||offset>=10000)return Response.json({error:'Offset inválido'},{status:400});
+   // Consulta controlada de 10 pedidos para evitar bloqueio e timeout.
+   const orders=await checked(db().from('meli_orders').select('order_id,seller_id,raw').eq('seller_id',c.seller_id).order('created_at',{ascending:false}).order('order_id',{ascending:false}).range(offset,offset+9));
+   let confirmed=0,partial=0,unavailable=0;
+   for(const o of orders){
+    const raw=o.raw||{},payments=(Array.isArray(raw.payments)?raw.payments:[]).filter(p=>p?.id);
+    const ids=[...new Set(payments.map(p=>String(p.id)))];
+    let snapshot={status:'sem_pagamento',net_amount:null,release_date:null,release_status:null,payment_status:null,payment_count:ids.length,checked_at:new Date().toISOString()};
+    if(ids.length){
+     let amounts=[],details=[],inaccessible=false;
+     for(const id of ids){
+      // Permitir somente IDs numéricos, nunca URL remota.
+      if(!/^\\d+$/.test(id)){inaccessible=true;continue}
+      const response=await fetch('https://api.mercadopago.com/v1/payments/'+encodeURIComponent(id),{headers:{Authorization:'Bearer '+token},cache:'no-store'});
+      if(response.status===429)throw Error('Mercado Pago limitou as consultas (HTTP 429). Tente mais tarde.');
+      if(response.status===401||response.status===403)throw Error('Credencial Mercado Pago sem acesso (HTTP '+response.status+'). Confira o Access Token de produção da conta vendedora.');
+      if(!response.ok){inaccessible=true;continue}
+      const p=await response.json();
+      const amount=p.transaction_details?.net_received_amount;
+      if(amount===null||amount===undefined||!Number.isFinite(Number(amount))){inaccessible=true;continue}
+      amounts.push(Number(amount));
+      details.push({id,status:p.status||null,money_release_status:p.money_release_status||null,money_release_date:p.money_release_date||null,amount:Number(amount)});
+     }
+     const available=amounts.length===ids.length&&!inaccessible;
+     snapshot={...snapshot,status:available?'consultado':'incompleto',net_amount:available?Math.round(amounts.reduce((a,b)=>a+b,0)*100)/100:null,
+      release_date:available&&details.every(p=>p.money_release_date)?details.map(p=>p.money_release_date).sort().at(-1):null,
+      release_status:available&&details.every(p=>p.money_release_status===details[0].money_release_status)?details[0].money_release_status:null,
+      payment_status:available&&details.every(p=>p.status===details[0].status)?details[0].status:null,
+      payment_count:ids.length};
+     if(available)confirmed++;else partial++;
+    }else unavailable++;
+    await checked(db().from('meli_orders').update({raw:{...raw,__concilia_mp:snapshot}}).eq('seller_id',c.seller_id).eq('order_id',o.order_id));
+   }
+   return Response.json({processed:orders.length,confirmed,partial,unavailable,offset:offset+orders.length,complete:orders.length<10,notice:'Valor do pagamento Mercado Pago não comprova saque bancário; podem existir ajustes posteriores'});
+  }
   if(action==='shipping'){
    const c=await validConnection();
    const body=await req.json().catch(()=>({})),offset=Number(body.offset??0);
@@ -90,10 +131,10 @@ export async function POST(req,{params}){const {action}=await params;if(!await a
      if(results.length){
       const ids=results.map(o=>String(o.id));
       const existing=await checked(db().from('meli_orders').select('order_id,raw').eq('seller_id',c.seller_id).in('order_id',ids));
-      const oldMap=new Map((existing||[]).map(o=>[o.order_id,o.raw?.__concilia_shipping]));
+      const oldMap=new Map((existing||[]).map(o=>[o.order_id,{shipping:o.raw?.__concilia_shipping,mp:o.raw?.__concilia_mp}]));
       await checked(db().from('meli_orders').upsert(results.map(o=>{
        const row=normalize(o),previous=oldMap.get(row.order_id);
-       return {...row,seller_id:c.seller_id,raw:previous?{...o,__concilia_shipping:previous}:o};
+       return {...row,seller_id:c.seller_id,raw:previous?{...o,...(previous.shipping?{__concilia_shipping:previous.shipping}:{}),...(previous.mp?{__concilia_mp:previous.mp}:{})}:o};
       }),{onConflict:'seller_id,order_id'}));
       processed+=results.length;
      }
