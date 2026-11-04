@@ -29,3 +29,15 @@ No painel use `Conferir Mercado Pago`: consulta em lotes de 10 os IDs de pagamen
 5. A consulta usa HMAC-SHA256, nonce em cookie HttpOnly e estado temporário no banco. Os tokens ficam criptografados no Supabase com `TOKEN_ENCRYPTION_KEY` (já usado pelo Mercado Livre). A API não divulga os tokens ao navegador.
 
 **Limitações:** a importação inicial busca até 100 páginas de 50 pedidos em sete dias; o painel mostra 100 registros recentes. A API Payment retorna `escrow_amount` (recebimento esperado) e, quando presente, `escrow_amount_after_adjustment`; valores podem mudar até a conclusão, e não comprovam transferência bancária. Para conciliação de recebidos, será necessário comparar com as liberações/extratos da Shopee. A integração ainda não foi testada com credenciais Live.
+
+## Múltiplas contas e lojas
+
+O painel permite adicionar contas Mercado Livre e lojas Shopee. Em cada aba, a seleção filtra pedidos, totais, tarifas, fretes e consultas financeiras pelo identificador da conta.
+
+Mercado Livre: clique em **+ Adicionar conta** e autorize outro vendedor. Se a plataforma mostrar a conta já cadastrada, mude de usuário no próprio Mercado Livre antes de confirmar a autorização. A conexão existente permanece; seller_id é único.
+
+Shopee: depois da aprovação Go-Live e da configuração das credenciais Live, use **+ Adicionar loja Shopee** para autorizar cada loja. A loja é selecionada pelo shop_id.
+
+Mercado Pago: a versão atual ainda utiliza um único MP_ACCESS_TOKEN, associado à conta emissora. Uma segunda conta pode não ter permissão para consultar pagamentos financeiros. As datas de liberação não provam depósitos.
+
+As tabelas atuais já admitem múltiplas lojas por seller_id/shop_id e pedidos com chaves compostas. Nenhuma migração adicional é necessária para o seletor multiloja. Não exponha os tokens ao navegador.
