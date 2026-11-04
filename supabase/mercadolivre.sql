@@ -1,0 +1,11 @@
+create extension if not exists pgcrypto;
+create table if not exists public.meli_connections(id uuid primary key default gen_random_uuid(),seller_id bigint not null unique,access_token_cipher text not null,refresh_token_cipher text not null,expires_at timestamptz not null,connected_at timestamptz not null default now(),updated_at timestamptz not null default now());
+create table if not exists public.meli_oauth_states(state_hash text primary key,verifier_cipher text not null,expires_at timestamptz not null,created_at timestamptz not null default now());
+create table if not exists public.meli_orders(id uuid primary key default gen_random_uuid(),seller_id bigint not null references public.meli_connections(seller_id) on delete cascade,order_id text not null,status text,created_at timestamptz,updated_at timestamptz,gross_amount numeric(16,2),sale_fees numeric(16,2),payment_status text,payout_status text not null default 'nao_verificado',currency_id text,raw jsonb,last_checked_at timestamptz not null default now(),unique(seller_id,order_id));
+create index if not exists idx_meli_orders_created on public.meli_orders(seller_id,created_at desc);
+create table if not exists public.meli_sync_runs(id uuid primary key default gen_random_uuid(),seller_id bigint,started_at timestamptz not null default now(),finished_at timestamptz,status text not null default 'running',processed int not null default 0,error_message text);
+alter table public.meli_connections enable row level security;
+alter table public.meli_oauth_states enable row level security;
+alter table public.meli_orders enable row level security;
+alter table public.meli_sync_runs enable row level security;
+revoke all on public.meli_connections,public.meli_oauth_states,public.meli_orders,public.meli_sync_runs from anon,authenticated;
