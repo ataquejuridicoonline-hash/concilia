@@ -23,12 +23,15 @@ export async function GET(req,{params}){
  if(!await admin(req))return Response.json({error:'Não autorizado'},{status:401});
  try{
   if(action==='status'){
-   let connected=false,shopId=null,migrationReady=true;
-   try{const c=await shopConnection();connected=!!c;shopId=c?.shop_id||null}catch(e){migrationReady=false}
-   return Response.json({configured:configured(),connected,shopId,migrationReady});
+   let shops=[],migrationReady=true;
+   try{shops=await checked(db().from('shopee_connections').select('shop_id,connected_at').order('connected_at',{ascending:true}))}catch(e){migrationReady=false}
+   return Response.json({configured:configured(),connected:shops.length>0,shops,migrationReady});
   }
   if(action==='orders'){
-   const {data,error,count}=await db().from('shopee_orders').select('order_sn,order_status,create_time,buyer_total,escrow_amount,escrow_after_adjustment,financial_status',{count:'exact'}).order('create_time',{ascending:false}).limit(100);
+   const shopId=new URL(req.url).searchParams.get('shop_id');
+   if(!/^[0-9]+$/.test(shopId||''))return Response.json({error:'Selecione uma loja Shopee'},{status:400});
+   if(!await shopConnection(shopId))return Response.json({error:'Loja Shopee não vinculada'},{status:404});
+   const {data,error,count}=await db().from('shopee_orders').select('order_sn,order_status,create_time,buyer_total,escrow_amount,escrow_after_adjustment,financial_status',{count:'exact'}).eq('shop_id',shopId).order('create_time',{ascending:false}).limit(100);
    if(error)throw Error(error.message);
    return Response.json({orders:data||[],total:count||0});
   }
@@ -48,7 +51,7 @@ export async function POST(req,{params}){
    return response;
   }
   if(action==='sync'){
-   const c=await activeShop(),body=await req.json().catch(()=>({}));
+   const body=await req.json().catch(()=>({})),c=await activeShop(body.shop_id);
    const timeTo=Number(body.timeTo),timeFrom=Number(body.timeFrom),cursor=String(body.cursor||'');
    if(!Number.isSafeInteger(timeFrom)||!Number.isSafeInteger(timeTo)||timeTo<=timeFrom||timeTo-timeFrom>7*86400||timeTo>Math.floor(Date.now()/1000)+60||cursor.length>256) return Response.json({error:'Intervalo inválido'},{status:400});
    const info=await shopGet('/api/v2/order/get_order_list',{time_range_field:'create_time',time_from:timeFrom,time_to:timeTo,page_size:50,...(cursor?{cursor}:{} )},c);
@@ -57,7 +60,7 @@ export async function POST(req,{params}){
    return Response.json({processed:rows.length,cursor:info.next_cursor||'',more:!!info.more});
   }
   if(action==='finance'){
-   const c=await activeShop(),body=await req.json().catch(()=>({})),offset=Number(body.offset||0);
+   const body=await req.json().catch(()=>({})),c=await activeShop(body.shop_id),offset=Number(body.offset||0);
    if(!Number.isInteger(offset)||offset<0||offset>10000)return Response.json({error:'Offset inválido'},{status:400});
    const orders=await checked(db().from('shopee_orders').select('order_sn').eq('shop_id',c.shop_id).order('create_time',{ascending:false}).order('order_sn',{ascending:false}).range(offset,offset+9));
    let ok=0,unavailable=0;
