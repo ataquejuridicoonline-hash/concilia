@@ -15,3 +15,10 @@
 .store-switch select:focus-visible{outline:3px solid #2563eb;outline-offset:2px}
 .store-switch small{font-size:12px}
 @media(max-width:800px){.store-switch{width:100%}.store-switch select{flex:1;min-width:130px}}
+
+/* Mercado Ads */
+.ads-page{display:grid;gap:18px}
+.ads-controls{margin-top:18px}
+.ads-cards{margin:0}
+.ads-controls button{white-space:nowrap}
+@media(max-width:640px){.platform-nav .platform-tab{flex:1 1 31%;font-size:13px}.ads-controls select{flex:1 1 45%}.ads-controls button{width:100%}.ads-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
