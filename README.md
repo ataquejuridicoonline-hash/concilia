@@ -53,3 +53,18 @@ Em janelas que atinjam o teto de paginação, a consulta **não** informa sucess
 ### Alertas iniciais de conciliação
 
 No Mercado Livre, a coluna **Diferença indicativa** compara `net_after_shipping` e `mp_net` quando os dois existem. Diferença acima de R$ 0,05 pode ser filtrada como caso a investigar, não como valor perdido: ainda pode haver estornos, ajustes ou diferenças de bases de cálculo. O filtro considera somente os pedidos carregados (até 500 por tela). Na Shopee os valores de escrow não são prova de transferência efetiva, e o relatório precisa ser cruzado com a liquidação para uma auditoria definitiva.
+
+## Auditoria financeira por pedido (versão inicial)
+
+Use a aba **Auditoria financeira**. Selecione Mercado Livre ou Shopee, a loja e o período (até 366 dias), e clique em **Gerar relatório**. A tela apresenta em páginas de 100: número e data do pedido, bruto, esperado, referência do pagamento, valor liberado informado pela plataforma, diferença (esperado menos liberado), classificação, hipóteses e fonte da evidência. Os botões **Carregar próximos 100 pedidos** e **Exportar CSV / Excel** operam apenas sobre os registros carregados. Os totais de inconsistências também correspondem apenas à amostra visível, não à base completa.
+
+### Critérios contábeis e evidências
+
+- **Mercado Livre esperado:** valor bruto menos tarifas de venda e custo do frete atribuível ao vendedor quando disponíveis. Não inclui todos os possíveis ajustes, cupons, subsídios, chargebacks ou estornos.
+- **Mercado Livre liberado na plataforma:** somente o líquido do pagamento consultado no Mercado Pago, com `money_release_status = released`. A data vem de `money_release_date`, quando disponível. Isso **não comprova depósito bancário**, e o líquido do pagamento pode seguir uma base diferente do líquido estimado por pedido.
+- **Shopee esperado:** escrow após ajustes quando disponível, senão escrow consultado ou net_amount legado. **Não existe valor liberado comprovado** nesta primeira fase; o sinalizador legado `release_evidence` sem comprovante e valor correspondente é insuficiente.
+- **Diferença:** esperado menos liberado, calculada apenas quando ambos os números têm suporte. Divergências acima de R$ 0,05 são sinalizadas como **a investigar**, não como cobrança indevida comprovada.
+- **Pendente:** falta frete, tarifa, pagamento, liberação ou conciliação com extrato.
+- **Cancelamento:** sinalização para revisão de estornos, sem presunção de prejuízo.
+
+A consulta exige o token Supabase do administrador, restringe cada conta/loja selecionada, não expõe tokens nem `raw` ao navegador e não altera pedidos. Dados históricos só aparecem quando anteriormente importados para o Concilia. Esta versão não reconcilia transferências efetivas ao banco; para isso, será necessário carregar extratos de liquidação de cada marketplace e movimentações bancárias com chaves de referência verificáveis.
