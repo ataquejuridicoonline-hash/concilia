@@ -49,3 +49,7 @@ O usuário pode selecionar data inicial e final na aba Mercado Livre ou Shopee, 
 A consulta usa **data de criação do pedido em UTC**, incluindo o dia inicial e final. Consultas de frete e pagamentos do Mercado Livre e consultas de escrow da Shopee usam as mesmas datas escolhidas, mas são operações separadas após a importação. Os relatórios exibem no máximo 500 pedidos Mercado Livre e 100 Shopee por tela; contadores refletem pedidos armazenados no período, não garantem toda a cobertura da API. A disponibilidade de pedidos históricos depende das regras e limites vigentes das APIs de cada plataforma.
 
 Em janelas que atinjam o teto de paginação, a consulta **não** informa sucesso: ela mostra uma mensagem de importação parcial e instrui a reduzir a janela. Os dados já importados não são apagados. Reimportações usam as chaves de pedido e loja para evitar duplicatas. Os valores exibidos não comprovam depósito ou repasse: discrepâncias definitivas exigem cruzamento com relatórios de liquidação e extratos.
+
+### Alertas iniciais de conciliação
+
+No Mercado Livre, a coluna **Diferença indicativa** compara `net_after_shipping` e `mp_net` quando os dois existem. Diferença acima de R$ 0,05 pode ser filtrada como caso a investigar, não como valor perdido: ainda pode haver estornos, ajustes ou diferenças de bases de cálculo. O filtro considera somente os pedidos carregados (até 500 por tela). Na Shopee os valores de escrow não são prova de transferência efetiva, e o relatório precisa ser cruzado com a liquidação para uma auditoria definitiva.
