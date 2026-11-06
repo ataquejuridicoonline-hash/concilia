@@ -38,7 +38,12 @@ export async function GET(req,{params}){
    const shopId=new URL(req.url).searchParams.get('shop_id');
    if(!/^[0-9]+$/.test(shopId||''))return Response.json({error:'Selecione uma loja Shopee'},{status:400});
    if(!await shopConnection(shopId))return Response.json({error:'Loja Shopee não vinculada'},{status:404});
-   const {data,error,count}=await db().from('shopee_orders').select('order_sn,order_status,create_time,buyer_total,escrow_amount,escrow_after_adjustment,financial_status',{count:'exact'}).eq('shop_id',shopId).order('create_time',{ascending:false}).limit(100);
+   const p=new URL(req.url).searchParams,start=p.get('dateStart'),end=p.get('dateEnd');
+   const validDates=start&&end&&/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(start)&&/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(end)&&start<=end;
+   if((start||end)&&!validDates)return Response.json({error:'Datas inválidas para consulta de pedidos Shopee'},{status:400});
+   let query=db().from('shopee_orders').select('order_sn,order_status,create_time,buyer_total,escrow_amount,escrow_after_adjustment,financial_status',{count:'exact'}).eq('shop_id',shopId);
+   if(validDates)query=query.gte('create_time',start+'T00:00:00.000Z').lte('create_time',new Date(Date.parse(end+'T00:00:00Z')+86400000-1).toISOString());
+   const {data,error,count}=await query.order('create_time',{ascending:false}).limit(100);
    if(error)throw Error(error.message);
    return Response.json({orders:data||[],total:count||0});
   }
