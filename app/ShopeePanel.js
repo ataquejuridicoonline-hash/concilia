@@ -55,7 +55,7 @@ export default function ShopeePanel({token}){
    if(which==='finance'){
     let offset=0,complete=false,ok=0,unavailable=0;
     do{
-     const data=await call('finance','POST',{offset,shop_id:selectedShop});
+     const data=await call('finance','POST',{offset,shop_id:selectedShop,dateStart:rangeStart,dateEnd:rangeEnd});
      if(!data.complete&&data.offset<=offset)throw Error('Consulta financeira não avançou');
      offset=data.offset;ok+=data.ok;unavailable+=data.unavailable;complete=data.complete;
      setProgress('Shopee: '+offset+' pedidos financeiros verificados • '+ok+' com valor esperado • '+unavailable+' pendências');
@@ -70,10 +70,10 @@ export default function ShopeePanel({token}){
   <div className="store-switch" style={{marginBottom:14}}><label htmlFor="shopee-shop">Loja Shopee</label><select id="shopee-shop" disabled={busy} value={selectedShop} onChange={e=>{setOrders([]);setTotal(0);setSelectedShop(e.target.value)}}><option value="">Selecione uma loja</option>{(status?.shops||[]).map(x=><option key={x.shop_id} value={String(x.shop_id)}>Loja {x.shop_id}</option>)}</select><small>{(status?.shops||[]).length} loja(s) conectada(s)</small></div><div className="actions" style={{justifyContent:'flex-start',marginBottom:16,flexWrap:'wrap'}}>
    <button disabled={busy||!status?.configured||!status?.migrationReady} onClick={()=>run('start')}>+ Adicionar loja Shopee</button>
    <button className="secondary" disabled={busy||!selectedShop} onClick={()=>run('sync')}>Importar 7 dias</button>
-   <button className="secondary" disabled={busy||!selectedShop} onClick={()=>run('finance')}>Conferir valores Shopee</button>
+   <button className="secondary" disabled={busy||!selectedShop} onClick={()=>run('finance')}>Conferir valores do período</button>
    <small>{selectedShop?'Loja selecionada: '+selectedShop:''}</small>
   </div>
-  <div className="history-range"><strong>Importação retroativa — Shopee</strong><div className="history-inputs"><label>Data inicial<input type="date" value={rangeStart} max={todayUTC()} disabled={busy} onChange={e=>setRangeStart(e.target.value)}/></label><label>Data final<input type="date" value={rangeEnd} max={todayUTC()} disabled={busy} onChange={e=>setRangeEnd(e.target.value)}/></label><button disabled={busy||!selectedShop} onClick={()=>run('sync',{start:rangeStart,end:rangeEnd})}>Importar período selecionado</button></div><small>Pesquisa por data de criação, dividida em janelas de até 7 dias (UTC). Histórico disponível depende dos limites da API Shopee. Valores financeiros são conferidos separadamente.</small></div>
+  <div className="history-range"><strong>Importação retroativa — Shopee</strong><div className="history-inputs"><label>Data inicial<input type="date" value={rangeStart} max={todayUTC()} disabled={busy} onChange={e=>setRangeStart(e.target.value)}/></label><label>Data final<input type="date" value={rangeEnd} max={todayUTC()} disabled={busy} onChange={e=>setRangeEnd(e.target.value)}/></label><button disabled={busy||!selectedShop} onClick={()=>run('sync',{start:rangeStart,end:rangeEnd})}>Importar período selecionado</button></div><small>Pesquisa por data de criação, dividida em janelas de até 7 dias (UTC). Histórico disponível depende dos limites da API Shopee. O botão Conferir valores consulta os pedidos já importados neste período.</small></div>
   {!status?.migrationReady&&<p className="notice">Falta executar o SQL de preparação do Supabase: supabase/shopee.sql.</p>}
   {progress&&<p className="notice" role="status">{progress}</p>}
   {error&&<p className="error">{error}</p>}
