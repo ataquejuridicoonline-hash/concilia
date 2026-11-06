@@ -1,8 +1,9 @@
 'use client';
 import {useEffect,useState} from 'react';
+import {todayUTC,daysAgoUTC,historyWindows} from '../lib/historyDates.js';
 const money=n=>n===null||n===undefined?'—':Number(n).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 export default function ShopeePanel({token}){
- const [selectedShop,setSelectedShop]=useState(''),[status,setStatus]=useState(null),[orders,setOrders]=useState([]),[total,setTotal]=useState(0),[error,setError]=useState(''),[progress,setProgress]=useState(''),[busy,setBusy]=useState(false);
+ const [rangeStart,setRangeStart]=useState(daysAgoUTC(7)),[rangeEnd,setRangeEnd]=useState(todayUTC()),[selectedShop,setSelectedShop]=useState(''),[status,setStatus]=useState(null),[orders,setOrders]=useState([]),[total,setTotal]=useState(0),[error,setError]=useState(''),[progress,setProgress]=useState(''),[busy,setBusy]=useState(false);
  async function call(action,method='GET',body,shopParam){
   const response=await fetch('/api/shopee/'+action+(shopParam?'?shop_id='+encodeURIComponent(shopParam):''),{method,credentials:'same-origin',headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,cache:'no-store'});
   const data=await response.json().catch(()=>({}));
@@ -31,21 +32,25 @@ export default function ShopeePanel({token}){
   const url=new URL(window.location.href);url.searchParams.delete('shopee');window.history.replaceState({},'',url.pathname+url.search+url.hash);
  },[token]);
  useEffect(()=>{if(token&&selectedShop)loadShop(selectedShop)},[selectedShop]);
- async function run(which){
+ async function run(which,range=null){
   setBusy(true);setError('');
   try{
    if(which==='start'){const data=await call('start','POST');window.location.assign(data.url);return}
    if(which==='sync'){
-    const timeTo=Math.floor(Date.now()/1000),timeFrom=timeTo-7*86400;
-    let cursor='',pages=0,count=0,more=true;
-    while(more&&pages<100){
-     const data=await call('sync','POST',{timeFrom,timeTo,cursor,shop_id:selectedShop});
-     pages++;count+=data.processed;
-     if(data.more&&(!data.cursor||data.cursor===cursor))throw Error('A paginação Shopee não avançou');
-     cursor=data.cursor;more=data.more;
-     setProgress('Shopee: '+count+' pedidos consultados');
+    const windows=historyWindows(range?.start||daysAgoUTC(7),range?.end||todayUTC());
+    let count=0;
+    for(const [index,w] of windows.entries()){
+     let cursor='',pages=0,more=true;
+     while(more&&pages<100){
+      const data=await call('sync','POST',{timeFrom:w.timeFrom,timeTo:w.timeTo,cursor,shop_id:selectedShop});
+      pages++;count+=data.processed;
+      if(data.more&&(!data.cursor||data.cursor===cursor))throw Error('A paginação Shopee não avançou na janela '+(index+1));
+      cursor=data.cursor;more=data.more;
+      setProgress('Shopee: janela '+(index+1)+'/'+windows.length+' • '+count+' pedidos consultados');
+     }
+     if(more)throw Error('Importação parcial: janela '+(index+1)+' atingiu o limite de 100 páginas. Escolha um intervalo menor.');
     }
-    if(more)setError('Consulta interrompida após 100 páginas; precisa de período menor.');
+    setProgress('Importação Shopee concluída: '+count+' pedidos consultados. Use Conferir valores Shopee para verificar os valores financeiros.');
    }
    if(which==='finance'){
     let offset=0,complete=false,ok=0,unavailable=0;
@@ -68,6 +73,7 @@ export default function ShopeePanel({token}){
    <button className="secondary" disabled={busy||!selectedShop} onClick={()=>run('finance')}>Conferir valores Shopee</button>
    <small>{selectedShop?'Loja selecionada: '+selectedShop:''}</small>
   </div>
+  <div className="history-range"><strong>Importação retroativa — Shopee</strong><div className="history-inputs"><label>Data inicial<input type="date" value={rangeStart} max={todayUTC()} disabled={busy} onChange={e=>setRangeStart(e.target.value)}/></label><label>Data final<input type="date" value={rangeEnd} max={todayUTC()} disabled={busy} onChange={e=>setRangeEnd(e.target.value)}/></label><button disabled={busy||!selectedShop} onClick={()=>run('sync',{start:rangeStart,end:rangeEnd})}>Importar período selecionado</button></div><small>Pesquisa por data de criação, dividida em janelas de até 7 dias (UTC). Histórico disponível depende dos limites da API Shopee. Valores financeiros são conferidos separadamente.</small></div>
   {!status?.migrationReady&&<p className="notice">Falta executar o SQL de preparação do Supabase: supabase/shopee.sql.</p>}
   {progress&&<p className="notice" role="status">{progress}</p>}
   {error&&<p className="error">{error}</p>}
