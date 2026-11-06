@@ -40,18 +40,19 @@ export async function GET(req,{params}){
    const shopId=new URL(req.url).searchParams.get('shop_id');
    if(!/^[0-9]+$/.test(shopId||''))return Response.json({error:'Selecione uma loja Shopee'},{status:400});
    if(!await shopConnection(shopId))return Response.json({error:'Loja Shopee não vinculada'},{status:404});
-   const p=new URL(req.url).searchParams,start=p.get('dateStart'),end=p.get('dateEnd');
+   const p=new URL(req.url).searchParams,start=p.get('dateStart'),end=p.get('dateEnd'),offset=Number(p.get('offset')||0);
+   if(!Number.isInteger(offset)||offset<0||offset>100000)return Response.json({error:'Paginação inválida'},{status:400});
    const validDates=start&&end&&/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(start)&&/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(end)&&start<=end;
    if((start||end)&&!validDates)return Response.json({error:'Datas inválidas para consulta de pedidos Shopee'},{status:400});
    let query=db().from('shopee_orders').select('order_sn,order_status,create_time,buyer_total,escrow_amount,escrow_after_adjustment,financial_status',{count:'exact'}).eq('shop_id',shopId);
    if(validDates)query=query.gte('create_time',start+'T00:00:00.000Z').lte('create_time',new Date(Date.parse(end+'T00:00:00Z')+86400000-1).toISOString());
-   const {data,error,count}=await query.order('create_time',{ascending:false}).limit(100);
+   const {data,error,count}=await query.order('create_time',{ascending:false}).order('order_sn',{ascending:false}).range(offset,offset+99);
    if(error)throw Error(error.message);
    const orders=data||[],ids=orders.map(x=>x.order_sn);
    let releases=[];
    if(ids.length)try{releases=await checked(db().from('shopee_releases').select('order_sn,released_amount,released_at').eq('shop_id',shopId).in('order_sn',ids))}catch(e){}
    const rmap=new Map(releases.map(x=>[x.order_sn,x]));
-   return Response.json({orders:orders.map(o=>({...o,released_amount:rmap.get(o.order_sn)?.released_amount??null,released_at:rmap.get(o.order_sn)?.released_at??null})),total:count||0});
+   return Response.json({orders:orders.map(o=>({...o,released_amount:rmap.get(o.order_sn)?.released_amount??null,released_at:rmap.get(o.order_sn)?.released_at??null})),total:count||0,offset,nextOffset:offset+orders.length,complete:offset+orders.length>=(count||0)});
   }
   return Response.json({error:'Rota não encontrada'},{status:404});
  }catch(e){return fail(e)}
