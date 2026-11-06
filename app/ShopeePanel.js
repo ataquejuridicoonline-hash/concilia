@@ -23,6 +23,13 @@ export default function ShopeePanel({token}){
   try{const data=await call('orders','GET',undefined,id);setOrders(data.orders||[]);setTotal(data.total||0);setError('')}catch(e){setError(e.message)}
  }
  useEffect(()=>{if(token)load()},[token]);
+ useEffect(()=>{
+  const result=new URLSearchParams(window.location.search).get('shopee');
+  if(!result)return;
+  if(result==='conectado'){setProgress('Autorização Shopee concluída. Selecione a loja para importar pedidos.');load()}
+  else {const meanings={autorizacao_incompleta:'A Shopee não retornou todos os dados da autorização. Inicie uma nova conexão.',autorizacao_expirada:'A autorização expirou ou foi iniciada em outra sessão. Tente conectar novamente.',token_invalido:'A Shopee não retornou tokens válidos. Confirme as credenciais de produção.',loja_divergente:'O identificador da loja não corresponde à autorização.',falha_autorizacao:'Falha ao salvar a autorização. Consulte os logs da função Shopee na Vercel.'};setError(meanings[result]||'Não foi possível concluir a autorização Shopee.')}
+  const url=new URL(window.location.href);url.searchParams.delete('shopee');window.history.replaceState({},'',url.pathname+url.search+url.hash);
+ },[token]);
  useEffect(()=>{if(token&&selectedShop)loadShop(selectedShop)},[selectedShop]);
  async function run(which){
   setBusy(true);setError('');
