@@ -42,7 +42,7 @@ export default function ShopeePanel({token}){
     for(const [index,w] of windows.entries()){
      let cursor='',pages=0,more=true;
      while(more&&pages<100){
-      const data=await call('sync','POST',{timeFrom:w.timeFrom,timeTo:w.timeTo,cursor,shop_id:selectedShop});
+      const data=await call('sync','POST',{timeFrom:w.timeFrom,timeTo:Math.min(w.timeTo,Math.floor(Date.now()/1000)),cursor,shop_id:selectedShop});
       pages++;count+=data.processed;
       if(data.more&&(!data.cursor||data.cursor===cursor))throw Error('A paginação Shopee não avançou na janela '+(index+1));
       cursor=data.cursor;more=data.more;
