@@ -69,7 +69,10 @@ export async function POST(req,{params}){
   if(action==='finance'){
    const body=await req.json().catch(()=>({})),c=await activeShop(body.shop_id),offset=Number(body.offset||0);
    if(!Number.isInteger(offset)||offset<0||offset>10000)return Response.json({error:'Offset inválido'},{status:400});
-   const orders=await checked(db().from('shopee_orders').select('order_sn').eq('shop_id',c.shop_id).order('create_time',{ascending:false}).order('order_sn',{ascending:false}).range(offset,offset+9));
+   const start=body.dateStart,end=body.dateEnd;
+   if(typeof start!=='string'||typeof end!=='string'||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(start)||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(end)||start>end||Date.parse(end+'T00:00:00Z')>Date.now())return Response.json({error:'Selecione um período válido para conferência Shopee.'},{status:400});
+   const periodEnd=new Date(Date.parse(end+'T00:00:00Z')+86400000-1).toISOString();
+   const orders=await checked(db().from('shopee_orders').select('order_sn').eq('shop_id',c.shop_id).gte('create_time',start+'T00:00:00.000Z').lte('create_time',periodEnd).order('create_time',{ascending:false}).order('order_sn',{ascending:false}).range(offset,offset+9));
    let ok=0,unavailable=0;
    for(const o of orders){
     try{
