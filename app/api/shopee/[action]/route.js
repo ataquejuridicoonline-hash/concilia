@@ -1,3 +1,4 @@
+import {syncOrderPage} from '../../../../lib/shopeeSync.js';
 import crypto from 'node:crypto';
 import {admin,db,checked,hash,seal} from '../../../../lib/server.js';
 import {configured,cfg,urlFor,publicPost,shopConnection,activeShop,shopGet,round} from '../../../../lib/shopee.js';
@@ -73,10 +74,14 @@ export async function POST(req,{params}){
    const body=await req.json().catch(()=>({})),c=await activeShop(body.shop_id);
    const timeTo=Number(body.timeTo),timeFrom=Number(body.timeFrom),cursor=String(body.cursor||'');
    if(!Number.isSafeInteger(timeFrom)||!Number.isSafeInteger(timeTo)||timeTo<=timeFrom||timeTo-timeFrom>7*86400||timeTo>Math.floor(Date.now()/1000)+60||cursor.length>256) return Response.json({error:'Intervalo inválido'},{status:400});
-   const info=await shopGet('/api/v2/order/get_order_list',{time_range_field:'create_time',time_from:timeFrom,time_to:timeTo,page_size:50,...(cursor?{cursor}:{} )},c);
-   const rows=(info.order_list||[]).filter(x=>x.order_sn).map(x=>({shop_id:c.shop_id,order_sn:String(x.order_sn),order_status:x.order_status||null,create_time:x.create_time?new Date(x.create_time*1000).toISOString():null,update_time:x.update_time?new Date(x.update_time*1000).toISOString():null}));
-   if(rows.length)await checked(db().from('shopee_orders').upsert(rows,{onConflict:'shop_id,order_sn',ignoreDuplicates:false}));
-   return Response.json({processed:rows.length,cursor:info.next_cursor||'',more:!!info.more});
+   const result=await syncOrderPage({connection:c,timeFrom,timeTo,cursor,get:shopGet,
+    save:rows=>checked(db().from('shopee_orders').upsert(rows,{onConflict:'shop_id,order_sn',ignoreDuplicates:false})),
+    verify:async ids=>{
+     const {count,error}=await db().from('shopee_orders').select('order_sn',{count:'exact',head:true}).eq('shop_id',c.shop_id).in('order_sn',ids).gte('create_time',new Date(timeFrom*1000).toISOString()).lte('create_time',new Date(timeTo*1000).toISOString());
+     if(error)throw Error('Falha ao verificar pedidos armazenados');return count;
+    }});
+   console.info('[Shopee sync]',JSON.stringify({queried:result.queried,stored:result.stored,more:result.more}));
+   return Response.json(result);
   }
   if(action==='releases'){
    const body=await req.json().catch(()=>({}));

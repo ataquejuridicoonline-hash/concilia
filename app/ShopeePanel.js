@@ -21,7 +21,7 @@ export default function ShopeePanel({token}){
  }
  async function loadShop(id,start=rangeStart,end=rangeEnd,offset=0){
   if(!id){setOrders([]);setTotal(0);return}
-  try{const data=await call('orders','GET',undefined,id,{start,end,offset});setOrders(old=>offset?[...old,...(data.orders||[])]:data.orders||[]);setNextOffset(data.nextOffset||0);setTotal(data.total||0);setError('')}catch(e){setError(e.message)}
+  try{const data=await call('orders','GET',undefined,id,{start,end,offset});setOrders(old=>offset?[...old,...(data.orders||[])]:data.orders||[]);setNextOffset(data.nextOffset||0);setTotal(data.total||0);setError('');return data}catch(e){setError(e.message);throw e}
  }
  useEffect(()=>{if(token)load()},[token]);
  useEffect(()=>{
@@ -31,29 +31,32 @@ export default function ShopeePanel({token}){
   else {const meanings={autorizacao_incompleta:'A Shopee não retornou todos os dados da autorização. Inicie uma nova conexão.',autorizacao_expirada:'A autorização expirou ou foi iniciada em outra sessão. Tente conectar novamente.',token_invalido:'A Shopee não retornou tokens válidos. Confirme as credenciais de produção.',loja_divergente:'O identificador da loja não corresponde à autorização.',falha_autorizacao:'Falha ao salvar a autorização. Consulte os logs da função Shopee na Vercel.'};setError(meanings[result]||'Não foi possível concluir a autorização Shopee.')}
   const url=new URL(window.location.href);url.searchParams.delete('shopee');window.history.replaceState({},'',url.pathname+url.search+url.hash);
  },[token]);
- useEffect(()=>{if(token&&selectedShop)loadShop(selectedShop)},[selectedShop]);
+ useEffect(()=>{if(token&&selectedShop)loadShop(selectedShop).catch(()=>{})},[selectedShop]);
  async function run(which,range=null){
   setBusy(true);setError('');
   try{
    if(which==='start'){const data=await call('start','POST');window.location.assign(data.url);return}
    if(which==='sync'){
-    const windows=historyWindows(range?.start||daysAgoUTC(7),range?.end||todayUTC());
-    let count=0;
+    const start=range?.start||daysAgoUTC(7),end=range?.end||todayUTC();
+    const windows=historyWindows(start,end);
+    setRangeStart(start);setRangeEnd(end);
+    let count=0,stored=0;
     for(const [index,w] of windows.entries()){
      let cursor='',pages=0,more=true;
      while(more&&pages<100){
       const data=await call('sync','POST',{timeFrom:w.timeFrom,timeTo:Math.min(w.timeTo,Math.floor(Date.now()/1000)),cursor,shop_id:selectedShop});
-      pages++;count+=data.processed;
+      pages++;count+=data.queried;stored+=data.stored;
       if(data.more&&(!data.cursor||data.cursor===cursor))throw Error('A paginação Shopee não avançou na janela '+(index+1));
       cursor=data.cursor;more=data.more;
-      setProgress('Shopee: janela '+(index+1)+'/'+windows.length+' • '+count+' pedidos consultados');
-      if(pages%5===0)await loadShop(selectedShop,range?.start||rangeStart,range?.end||rangeEnd);
+      setProgress('Shopee: janela '+(index+1)+'/'+windows.length+' • '+count+' consultados • '+stored+' gravados e confirmados');
+      if(pages%5===0)await loadShop(selectedShop,start,end);
      }
      if(more)throw Error('Importação parcial: janela '+(index+1)+' atingiu o limite de 100 páginas. Escolha um intervalo menor.');
     }
-    await loadShop(selectedShop,range?.start||rangeStart,range?.end||rangeEnd);
+    const report=await loadShop(selectedShop,start,end);
     setReleaseSummary(null);
-    setProgress('Importação concluída: '+count+' registros consultados; confira a quantidade de pedidos distintos na tabela.');
+    setProgress('Importação concluída: '+count+' consultados • '+stored+' gravados e confirmados (inclui atualizações) • '+report.total+' pedidos distintos no período.');
+    return;
    }
    if(which==='releases'){
     if(!status?.releasesReady)throw Error('Execute antes o SQL supabase/shopee_releases.sql no seu Supabase.');
@@ -93,7 +96,7 @@ export default function ShopeePanel({token}){
    <button className="secondary" disabled={busy||!selectedShop} onClick={()=>run('finance')}>Conferir valores do período</button>
    <small>{selectedShop?'Loja selecionada: '+selectedShop:''}</small>
   </div>
-  <div className="history-range"><strong>Importação retroativa — Shopee</strong><div className="history-inputs"><label>Data inicial<input type="date" value={rangeStart} max={todayUTC()} disabled={busy} onChange={e=>setRangeStart(e.target.value)}/></label><label>Data final<input type="date" value={rangeEnd} max={todayUTC()} disabled={busy} onChange={e=>setRangeEnd(e.target.value)}/></label><button disabled={busy||!selectedShop} onClick={()=>run('sync',{start:rangeStart,end:rangeEnd})}>Importar período selecionado</button><button className="secondary" disabled={busy||!selectedShop} onClick={()=>loadShop(selectedShop)}>Ver relatório do período</button><button disabled={busy||!selectedShop||!status?.releasesReady} onClick={()=>run('releases')}>Consultar liberações na carteira</button></div><small>Pesquisa por data de criação, dividida em janelas de até 7 dias (UTC). Histórico disponível depende dos limites da API Shopee. O botão Conferir valores consulta pedidos criados no período. Consultar liberações usa a data em que a Shopee creditou o dinheiro na carteira, que pode ser posterior à venda.</small></div>
+  <div className="history-range"><strong>Importação retroativa — Shopee</strong><div className="history-inputs"><label>Data inicial<input type="date" value={rangeStart} max={todayUTC()} disabled={busy} onChange={e=>setRangeStart(e.target.value)}/></label><label>Data final<input type="date" value={rangeEnd} max={todayUTC()} disabled={busy} onChange={e=>setRangeEnd(e.target.value)}/></label><button disabled={busy||!selectedShop} onClick={()=>run('sync',{start:rangeStart,end:rangeEnd})}>Importar período selecionado</button><button className="secondary" disabled={busy||!selectedShop} onClick={()=>loadShop(selectedShop).catch(()=>{})}>Ver relatório do período</button><button disabled={busy||!selectedShop||!status?.releasesReady} onClick={()=>run('releases')}>Consultar liberações na carteira</button></div><small>Pesquisa por data de criação, dividida em janelas de até 7 dias (UTC). Histórico disponível depende dos limites da API Shopee. O botão Conferir valores consulta pedidos criados no período. Consultar liberações usa a data em que a Shopee creditou o dinheiro na carteira, que pode ser posterior à venda.</small></div>
   {!status?.releasesReady&&<p className="notice">Para consultar quanto a Shopee liberou, execute o SQL <strong>supabase/shopee_releases.sql</strong> no Supabase. Não altera Mercado Livre nem pedidos antigos.</p>}
   {releaseSummary&&<p className="notice">Créditos na carteira Shopee de {releaseSummary.start} até {releaseSummary.end}: <strong>{releaseSummary.count} registros, total {money(releaseSummary.total)}</strong>, em {releaseSummary.windows} janelas. Isto não comprova transferência bancária e pode incluir pedidos vendidos em outros meses.</p>}
   {!status?.migrationReady&&<p className="notice">Falta executar o SQL de preparação do Supabase: supabase/shopee.sql.</p>}
@@ -103,6 +106,6 @@ export default function ShopeePanel({token}){
   <div className="scroll"><table><thead><tr><th>Pedido Shopee</th><th>Status</th><th>Compra do cliente</th><th>Escrow previsto</th><th>Após ajustes</th><th>Crédito na carteira</th><th>Conferência</th></tr></thead><tbody>
    {orders.length?orders.map(o=><tr key={o.order_sn}><td>{o.order_sn}</td><td>{o.order_status||'—'}</td><td>{money(o.buyer_total)}</td><td><strong>{money(o.escrow_amount)}</strong></td><td>{money(o.escrow_after_adjustment)}</td><td>{money(o.released_amount)}<br/><small>{o.released_at?'Liberado '+new Date(o.released_at).toLocaleDateString('pt-BR'):'Sem crédito localizado'}</small></td><td>{o.financial_status==='valor_esperado'?'Previsto, não liberado':'Pendente'}</td></tr>):<tr><td colSpan="7">Nenhum pedido Shopee importado.</td></tr>}
   </tbody></table></div>
-  {nextOffset<total&&<button className="secondary" disabled={busy} onClick={()=>loadShop(selectedShop,rangeStart,rangeEnd,nextOffset)}>Carregar mais 100 pedidos ({orders.length} de {total})</button>}
+  {nextOffset<total&&<button className="secondary" disabled={busy} onClick={()=>loadShop(selectedShop,rangeStart,rangeEnd,nextOffset).catch(()=>{})}>Carregar mais 100 pedidos ({orders.length} de {total})</button>}
  </section>
 }
