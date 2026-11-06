@@ -90,7 +90,7 @@ export async function POST(req,{params}){
      released_at:new Date(Number(x.escrow_release_time)*1000).toISOString(),source:'shopee_get_escrow_list',checked_at:new Date().toISOString()
    }));
    if(items.length)await checked(db().from('shopee_releases').upsert(items,{onConflict:'shop_id,order_sn'}));
-   return Response.json({processed:items.length,more:!!result.more,page,period:'liberacao_carteira',sample:items.length?items[0].released_at:null});
+   return Response.json({processed:items.length,totalReleased:Math.round(items.reduce((sum,x)=>sum+x.released_amount,0)*100)/100,more:!!result.more,page,period:'liberacao_carteira'});
   }
   if(action==='finance'){
    const body=await req.json().catch(()=>({})),c=await activeShop(body.shop_id),offset=Number(body.offset||0);
