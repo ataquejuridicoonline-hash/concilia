@@ -58,18 +58,18 @@ export default function ShopeePanel({token}){
    if(which==='releases'){
     if(!status?.releasesReady)throw Error('Execute antes o SQL supabase/shopee_releases.sql no seu Supabase.');
     const windows=historyWindows(rangeStart,rangeEnd);
-    let credited=0,amountPages=0;
+    let credited=0,amountPages=0,totalReleased=0;
     for(const [i,w] of windows.entries()){
      let page=1,more=true;
      while(more&&page<=100){
       const result=await call('releases','POST',{shop_id:selectedShop,timeFrom:w.timeFrom,timeTo:Math.min(w.timeTo,Math.floor(Date.now()/1000)),page});
-      credited+=result.processed;amountPages++;
+      credited+=result.processed;totalReleased+=Number(result.totalReleased||0);amountPages++;
       more=result.more;page++;
       setProgress('Liberações Shopee: janela '+(i+1)+'/'+windows.length+' • '+credited+' créditos na carteira consultados');
       if(more&&page>100)throw Error('Limite de 100 páginas atingido. Divida o período em intervalos menores.');
      }
     }
-    setReleaseSummary({count:credited,windows:windows.length,pages:amountPages});
+    setReleaseSummary({count:credited,total:Math.round(totalReleased*100)/100,windows:windows.length,pages:amountPages,start:rangeStart,end:rangeEnd});
     await loadShop(selectedShop);setBusy(false);return;
    }
    if(which==='finance'){
@@ -93,9 +93,9 @@ export default function ShopeePanel({token}){
    <button className="secondary" disabled={busy||!selectedShop} onClick={()=>run('finance')}>Conferir valores do período</button>
    <small>{selectedShop?'Loja selecionada: '+selectedShop:''}</small>
   </div>
-  <div className="history-range"><strong>Importação retroativa — Shopee</strong><div className="history-inputs"><label>Data inicial<input type="date" value={rangeStart} max={todayUTC()} disabled={busy} onChange={e=>setRangeStart(e.target.value)}/></label><label>Data final<input type="date" value={rangeEnd} max={todayUTC()} disabled={busy} onChange={e=>setRangeEnd(e.target.value)}/></label><button disabled={busy||!selectedShop} onClick={()=>run('sync',{start:rangeStart,end:rangeEnd})}>Importar período selecionado</button><button className="secondary" disabled={busy||!selectedShop} onClick={()=>loadShop(selectedShop)}>Ver relatório do período</button><button disabled={busy||!selectedShop||!status?.releasesReady} onClick={()=>run('releases')}>Consultar liberações na carteira</button></div><small>Pesquisa por data de criação, dividida em janelas de até 7 dias (UTC). Histórico disponível depende dos limites da API Shopee. O botão Conferir valores consulta os pedidos já importados neste período.</small></div>
+  <div className="history-range"><strong>Importação retroativa — Shopee</strong><div className="history-inputs"><label>Data inicial<input type="date" value={rangeStart} max={todayUTC()} disabled={busy} onChange={e=>setRangeStart(e.target.value)}/></label><label>Data final<input type="date" value={rangeEnd} max={todayUTC()} disabled={busy} onChange={e=>setRangeEnd(e.target.value)}/></label><button disabled={busy||!selectedShop} onClick={()=>run('sync',{start:rangeStart,end:rangeEnd})}>Importar período selecionado</button><button className="secondary" disabled={busy||!selectedShop} onClick={()=>loadShop(selectedShop)}>Ver relatório do período</button><button disabled={busy||!selectedShop||!status?.releasesReady} onClick={()=>run('releases')}>Consultar liberações na carteira</button></div><small>Pesquisa por data de criação, dividida em janelas de até 7 dias (UTC). Histórico disponível depende dos limites da API Shopee. O botão Conferir valores consulta pedidos criados no período. Consultar liberações usa a data em que a Shopee creditou o dinheiro na carteira, que pode ser posterior à venda.</small></div>
   {!status?.releasesReady&&<p className="notice">Para consultar quanto a Shopee liberou, execute o SQL <strong>supabase/shopee_releases.sql</strong> no Supabase. Não altera Mercado Livre nem pedidos antigos.</p>}
-  {releaseSummary&&<p className="notice">Créditos na carteira Shopee consultados por data de liberação: <strong>{releaseSummary.count}</strong> registros, em {releaseSummary.windows} janelas. Este número não representa transferências bancárias.</p>}
+  {releaseSummary&&<p className="notice">Créditos na carteira Shopee de {releaseSummary.start} até {releaseSummary.end}: <strong>{releaseSummary.count} registros, total {money(releaseSummary.total)}</strong>, em {releaseSummary.windows} janelas. Isto não comprova transferência bancária e pode incluir pedidos vendidos em outros meses.</p>}
   {!status?.migrationReady&&<p className="notice">Falta executar o SQL de preparação do Supabase: supabase/shopee.sql.</p>}
   {progress&&<p className="notice" role="status">{progress}</p>}
   {error&&<p className="error">{error}</p>}
