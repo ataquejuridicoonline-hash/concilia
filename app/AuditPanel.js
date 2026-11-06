@@ -5,7 +5,7 @@ const money=x=>x===null||x===undefined?'Não comprovado':Number(x).toLocaleStrin
 const labels={divergencia:'Diferença a investigar',conferido_plataforma:'Conferido na plataforma',pendente:'Pendente de evidências',revisar:'Revisar cancelamento'};
 const exportValue=v=>{let s=String(v??'');if(/^[=+@\-\t\r]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"'}
 export default function AuditPanel({token,meliStores=[]}){
- const [platform,setPlatform]=useState('meli'),[shopeeStores,setShopeeStores]=useState([]),[store,setStore]=useState(''),[start,setStart]=useState(daysAgoUTC(30)),[end,setEnd]=useState(todayUTC());
+ const [platform,setPlatform]=useState('shopee'),[shopeeStores,setShopeeStores]=useState([]),[store,setStore]=useState(''),[start,setStart]=useState(daysAgoUTC(30)),[end,setEnd]=useState(todayUTC());
  const [data,setData]=useState(null),[rows,setRows]=useState([]),[error,setError]=useState(''),[busy,setBusy]=useState(false),[onlyProblems,setOnlyProblems]=useState(false);
  useEffect(()=>{
   if(!token)return;
