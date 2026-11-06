@@ -41,3 +41,11 @@ Shopee: depois da aprovação Go-Live e da configuração das credenciais Live, 
 Mercado Pago: a versão atual ainda utiliza um único MP_ACCESS_TOKEN, associado à conta emissora. Uma segunda conta pode não ter permissão para consultar pagamentos financeiros. As datas de liberação não provam depósitos.
 
 As tabelas atuais já admitem múltiplas lojas por seller_id/shop_id e pedidos com chaves compostas. Nenhuma migração adicional é necessária para o seletor multiloja. Não exponha os tokens ao navegador.
+
+## Conciliação retroativa por calendário
+
+O usuário pode selecionar data inicial e final na aba Mercado Livre ou Shopee, clicar em **Importar período selecionado** e depois em **Ver relatório do período**. O atalho **Sincronizar 7 dias / Importar 7 dias** continua disponível. Um período longo é dividido automaticamente em janelas de até 7 dias, com paginação e atualização de progresso, até o limite de 366 dias por execução.
+
+A consulta usa **data de criação do pedido em UTC**, incluindo o dia inicial e final. Consultas de frete e pagamentos do Mercado Livre e consultas de escrow da Shopee usam as mesmas datas escolhidas, mas são operações separadas após a importação. Os relatórios exibem no máximo 500 pedidos Mercado Livre e 100 Shopee por tela; contadores refletem pedidos armazenados no período, não garantem toda a cobertura da API. A disponibilidade de pedidos históricos depende das regras e limites vigentes das APIs de cada plataforma.
+
+Em janelas que atinjam o teto de paginação, a consulta **não** informa sucesso: ela mostra uma mensagem de importação parcial e instrui a reduzir a janela. Os dados já importados não são apagados. Reimportações usam as chaves de pedido e loja para evitar duplicatas. Os valores exibidos não comprovam depósito ou repasse: discrepâncias definitivas exigem cruzamento com relatórios de liquidação e extratos.
