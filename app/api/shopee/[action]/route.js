@@ -43,7 +43,10 @@ export async function GET(req,{params}){
    if(!await shopConnection(shopId))return Response.json({error:'Loja Shopee não vinculada'},{status:404});
    const {data,error,count}=await db().from('shopee_releases').select('order_sn,released_amount,released_at',{count:'exact'}).eq('shop_id',shopId).gte('released_at',start+'T00:00:00Z').lte('released_at',new Date(Date.parse(end+'T00:00:00Z')+86400000-1).toISOString()).order('released_at',{ascending:false}).order('order_sn',{ascending:false}).range(offset,offset+99);
    if(error)throw Error('Não foi possível carregar os créditos armazenados');
-   return Response.json({credits:data||[],total:count||0,nextOffset:offset+(data||[]).length});
+   const ids=(data||[]).map(x=>x.order_sn);
+   const orders=ids.length?await checked(db().from('shopee_orders').select('order_sn,order_status,buyer_total,escrow_amount,escrow_after_adjustment,financial_status').eq('shop_id',shopId).in('order_sn',ids)):[];
+   const orderMap=new Map(orders.map(o=>[o.order_sn,o]));
+   return Response.json({credits:(data||[]).map(c=>({...orderMap.get(c.order_sn),...c})),total:count||0,nextOffset:offset+(data||[]).length});
   }
   if(action==='orders'){
    const shopId=new URL(req.url).searchParams.get('shop_id');

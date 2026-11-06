@@ -1,9 +1,10 @@
 'use client';
 import {useEffect,useState} from 'react';
+import {compareShopeeAmounts} from '../lib/shopeeComparison.js';
 import {todayUTC,daysAgoUTC,historyWindows} from '../lib/historyDates.js';
 const money=n=>n===null||n===undefined?'—':Number(n).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 export default function ShopeePanel({token}){
- const [credits,setCredits]=useState([]),[creditTotal,setCreditTotal]=useState(null),[creditOffset,setCreditOffset]=useState(0);
+ const [view,setView]=useState('sales');
  const [nextOffset,setNextOffset]=useState(0),[releaseSummary,setReleaseSummary]=useState(null),[rangeStart,setRangeStart]=useState(daysAgoUTC(7)),[rangeEnd,setRangeEnd]=useState(todayUTC()),[selectedShop,setSelectedShop]=useState(''),[status,setStatus]=useState(null),[orders,setOrders]=useState([]),[total,setTotal]=useState(0),[error,setError]=useState(''),[progress,setProgress]=useState(''),[busy,setBusy]=useState(false);
  async function call(action,method='GET',body,shopParam,dates){
   const response=await fetch('/api/shopee/'+action+(shopParam?'?shop_id='+encodeURIComponent(shopParam):'')+(dates?'&dateStart='+encodeURIComponent(dates.start)+'&dateEnd='+encodeURIComponent(dates.end)+'&offset='+encodeURIComponent(dates.offset||0):''),{method,credentials:'same-origin',headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,cache:'no-store'});
@@ -22,11 +23,11 @@ export default function ShopeePanel({token}){
  }
  async function loadShop(id,start=rangeStart,end=rangeEnd,offset=0){
   if(!id){setOrders([]);setTotal(0);return}
-  try{const data=await call('orders','GET',undefined,id,{start,end,offset});setOrders(old=>offset?[...old,...(data.orders||[])]:data.orders||[]);setNextOffset(data.nextOffset||0);setTotal(data.total||0);setError('');return data}catch(e){setError(e.message);throw e}
+  try{const data=await call('orders','GET',undefined,id,{start,end,offset});setOrders(old=>offset?[...old,...(data.orders||[])]:data.orders||[]);setNextOffset(data.nextOffset||0);setTotal(data.total||0);setView('sales');setError('');return data}catch(e){setError(e.message);throw e}
  }
  async function loadCredits(offset=0){
   const data=await call('credits','GET',undefined,selectedShop,{start:rangeStart,end:rangeEnd,offset});
-  setCredits(old=>offset?[...old,...data.credits]:data.credits);setCreditTotal(data.total);setCreditOffset(data.nextOffset);
+  setOrders(old=>offset?[...old,...data.credits]:data.credits);setTotal(data.total);setNextOffset(data.nextOffset);setView('credits');
  }
  useEffect(()=>{if(token)load()},[token]);
  useEffect(()=>{
@@ -78,7 +79,7 @@ export default function ShopeePanel({token}){
      }
     }
     setReleaseSummary({count:credited,total:Math.round(totalReleased*100)/100,windows:windows.length,pages:amountPages,start:rangeStart,end:rangeEnd});
-    await loadShop(selectedShop);await loadCredits();
+    await loadShop(selectedShop);
    }
    if(which==='finance'||which==='releases'){
     let offset=0,complete=false,ok=0,unavailable=0;
@@ -96,23 +97,25 @@ export default function ShopeePanel({token}){
  }
  return <section className="card" style={{marginTop:20}}>
   <div className="sectiontitle"><div><h2>Shopee — Conciliação</h2><small>Integração em preparação para aprovação Go-Live</small></div><span className="tag">{status?.connected?'LOJA CONECTADA':status?.configured?'PRONTA PARA AUTORIZAR':'AGUARDANDO CREDENCIAIS'}</span></div>
-  <div className="store-switch" style={{marginBottom:14}}><label htmlFor="shopee-shop">Loja Shopee</label><select id="shopee-shop" disabled={busy} value={selectedShop} onChange={e=>{setOrders([]);setTotal(0);setNextOffset(0);setProgress('');setError('');setReleaseSummary(null);setCredits([]);setCreditTotal(null);setSelectedShop(e.target.value)}}><option value="">Selecione uma loja</option>{(status?.shops||[]).map(x=><option key={x.shop_id} value={String(x.shop_id)}>Loja {x.shop_id}</option>)}</select><small>{(status?.shops||[]).length} loja(s) conectada(s)</small></div><div className="actions" style={{justifyContent:'flex-start',marginBottom:16,flexWrap:'wrap'}}>
+  <div className="store-switch" style={{marginBottom:14}}><label htmlFor="shopee-shop">Loja Shopee</label><select id="shopee-shop" disabled={busy} value={selectedShop} onChange={e=>{setOrders([]);setTotal(0);setNextOffset(0);setProgress('');setError('');setReleaseSummary(null);setView('sales');setSelectedShop(e.target.value)}}><option value="">Selecione uma loja</option>{(status?.shops||[]).map(x=><option key={x.shop_id} value={String(x.shop_id)}>Loja {x.shop_id}</option>)}</select><small>{(status?.shops||[]).length} loja(s) conectada(s)</small></div><div className="actions" style={{justifyContent:'flex-start',marginBottom:16,flexWrap:'wrap'}}>
    <button disabled={busy||!status?.configured||!status?.migrationReady} onClick={()=>run('start')}>+ Adicionar loja Shopee</button>
    <button className="secondary" disabled={busy||!selectedShop} onClick={()=>run('sync')}>Importar 7 dias</button>
    <button className="secondary" disabled={busy||!selectedShop} onClick={()=>run('finance')}>Conferir valores do período</button>
    <small>{selectedShop?'Loja selecionada: '+selectedShop:''}</small>
   </div>
-  <div className="history-range"><strong>Importação retroativa — Shopee</strong><div className="history-inputs"><label>Data inicial<input type="date" value={rangeStart} max={todayUTC()} disabled={busy} onChange={e=>{setRangeStart(e.target.value);setCreditTotal(null);setCredits([]);setReleaseSummary(null)}}/></label><label>Data final<input type="date" value={rangeEnd} max={todayUTC()} disabled={busy} onChange={e=>{setRangeEnd(e.target.value);setCreditTotal(null);setCredits([]);setReleaseSummary(null)}}/></label><button disabled={busy||!selectedShop} onClick={()=>run('sync',{start:rangeStart,end:rangeEnd})}>Importar período selecionado</button><button className="secondary" disabled={busy||!selectedShop} onClick={()=>loadShop(selectedShop).catch(()=>{})}>Ver relatório do período</button><button disabled={busy||!selectedShop||!status?.releasesReady} onClick={()=>run('releases')}>Consultar liberações e valores</button><button className="secondary" disabled={busy||!selectedShop||!status?.releasesReady} onClick={()=>loadCredits().catch(e=>setError(e.message))}>Ver créditos já consultados</button></div><small>Pesquisa por data de criação, dividida em janelas de até 7 dias (UTC). Histórico disponível depende dos limites da API Shopee. O botão Conferir valores consulta pedidos criados no período. Consultar liberações usa a data em que a Shopee creditou o dinheiro na carteira, que pode ser posterior à venda.</small></div>
+  <div className="history-range"><strong>Importação retroativa — Shopee</strong><div className="history-inputs"><label>Data inicial<input type="date" value={rangeStart} max={todayUTC()} disabled={busy} onChange={e=>{setRangeStart(e.target.value);setReleaseSummary(null)}}/></label><label>Data final<input type="date" value={rangeEnd} max={todayUTC()} disabled={busy} onChange={e=>{setRangeEnd(e.target.value);setReleaseSummary(null)}}/></label><button disabled={busy||!selectedShop} onClick={()=>run('sync',{start:rangeStart,end:rangeEnd})}>Importar período selecionado</button><button className="secondary" disabled={busy||!selectedShop} onClick={()=>loadShop(selectedShop).catch(()=>{})}>Ver relatório do período</button><button disabled={busy||!selectedShop||!status?.releasesReady} onClick={()=>run('releases')}>Consultar liberações e valores</button><button className="secondary" disabled={busy||!selectedShop||!status?.releasesReady} onClick={()=>loadCredits().catch(e=>setError(e.message))}>Ver por data de recebimento</button></div><small>Pesquisa por data de criação, dividida em janelas de até 7 dias (UTC). Histórico disponível depende dos limites da API Shopee. O botão Conferir valores consulta pedidos criados no período. Consultar liberações usa a data em que a Shopee creditou o dinheiro na carteira, que pode ser posterior à venda.</small></div>
   {!status?.releasesReady&&<p className="notice">Para consultar quanto a Shopee liberou, execute o SQL <strong>supabase/shopee_releases.sql</strong> no Supabase. Não altera Mercado Livre nem pedidos antigos.</p>}
   {releaseSummary&&<p className="notice">Créditos na carteira Shopee de {releaseSummary.start} até {releaseSummary.end}: <strong>{releaseSummary.count} registros, total {money(releaseSummary.total)}</strong>, em {releaseSummary.windows} janelas. Isto não comprova transferência bancária e pode incluir pedidos vendidos em outros meses.</p>}
   {!status?.migrationReady&&<p className="notice">Falta executar o SQL de preparação do Supabase: supabase/shopee.sql.</p>}
   {progress&&<p className="notice" role="status">{progress}</p>}
   {error&&<p className="error">{error}</p>}
-  <p className="notice">Pedidos encontrados no período: {total}. Os valores de escrow são previsões de recebimento e podem mudar até a finalização. Não são comprovantes de repasse ou depósito.</p>
-  {creditTotal!==null&&<div className="card"><h3>Créditos na carteira por data de liberação</h3><p>{creditTotal} créditos armazenados de {rangeStart} até {rangeEnd}. Inclui vendas de outros períodos. A tabela de pedidos abaixo usa a data da venda.</p><div className="scroll"><table><thead><tr><th>Pedido</th><th>Data do crédito</th><th>Valor na carteira</th></tr></thead><tbody>{credits.length?credits.map(c=><tr key={c.order_sn}><td>{c.order_sn}</td><td>{new Date(c.released_at).toLocaleDateString('pt-BR',{timeZone:'UTC'})}</td><td>{money(c.released_amount)}</td></tr>):<tr><td colSpan="3">Nenhum crédito armazenado no período de liberação.</td></tr>}</tbody></table></div>{creditOffset<creditTotal&&<button disabled={busy} onClick={()=>loadCredits(creditOffset).catch(e=>setError(e.message))}>Carregar mais créditos ({credits.length} de {creditTotal})</button>}</div>}
-  <div className="scroll"><table><thead><tr><th>Pedido Shopee</th><th>Status</th><th>Compra do cliente</th><th>Escrow previsto</th><th>Após ajustes</th><th>Crédito na carteira</th><th>Conferência</th></tr></thead><tbody>
-   {orders.length?orders.map(o=><tr key={o.order_sn}><td>{o.order_sn}</td><td>{o.order_status||'—'}</td><td>{money(o.buyer_total)}</td><td><strong>{money(o.escrow_amount)}</strong></td><td>{money(o.escrow_after_adjustment)}</td><td>{money(o.released_amount)}<br/><small>{o.released_at?'Liberado '+new Date(o.released_at).toLocaleDateString('pt-BR'):'Crédito ainda não localizado; pode ocorrer após a venda'}</small></td><td>{o.released_at?'Crédito confirmado na carteira':o.financial_status==='valor_esperado'?'Valores consultados; crédito não localizado':'Valores ainda não consultados ou indisponíveis'}</td></tr>):<tr><td colSpan="7">Nenhum pedido Shopee importado.</td></tr>}
+  <p className="notice">A diferença é o recebido na carteira menos o valor após ajustes. Valores negativos indicam recebimento menor; positivos, maior. Só comparamos quando os dois valores estão disponíveis. Créditos podem ocorrer após o mês da venda.</p>
+  <div className="sectiontitle"><div><h3>Comparação por pedido</h3><small>{view==='credits'?'Período pela data do recebimento na carteira':'Período pela data da venda'} • {total} registros</small></div><span className="tag">Após ajustes → Recebido → Diferença</span></div>
+
+  <div className="scroll"><table><thead><tr><th>Pedido Shopee</th><th>Status</th><th>Compra do cliente</th><th>Previsto pela Shopee</th><th>Após ajustes</th><th>Recebido na carteira</th><th>Diferença</th><th>Conferência</th></tr></thead><tbody>
+   {orders.length?orders.map(o=>{const comparison=compareShopeeAmounts(o);return <tr key={o.order_sn}><td>{o.order_sn}</td><td>{o.order_status||'—'}</td><td>{money(o.buyer_total)}</td><td>{money(o.escrow_amount)}</td><td><strong>{money(o.escrow_after_adjustment)}</strong></td><td><strong>{money(o.released_amount)}</strong><br/><small>{o.released_at?'Recebido '+new Date(o.released_at).toLocaleDateString('pt-BR',{timeZone:'UTC'}):'Recebimento não localizado'}</small></td><td style={{color:comparison.status==='divergente'?'#b42318':comparison.status==='confere'?'#16794b':undefined}}><strong>{money(comparison.difference)}</strong></td><td>{comparison.label}</td></tr>}):<tr><td colSpan="8">{view==='credits'?'Nenhum recebimento armazenado no período.':'Nenhum pedido Shopee importado no período.'}</td></tr>}
+
   </tbody></table></div>
-  {nextOffset<total&&<button className="secondary" disabled={busy} onClick={()=>loadShop(selectedShop,rangeStart,rangeEnd,nextOffset).catch(()=>{})}>Carregar mais 100 pedidos ({orders.length} de {total})</button>}
+  {nextOffset<total&&<button className="secondary" disabled={busy} onClick={()=>(view==='credits'?loadCredits(nextOffset):loadShop(selectedShop,rangeStart,rangeEnd,nextOffset)).catch(e=>setError(e.message))}>Carregar mais 100 registros ({orders.length} de {total})</button>}
  </section>
 }
