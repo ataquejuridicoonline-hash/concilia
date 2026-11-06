@@ -21,8 +21,16 @@ export async function GET(req,{params}){const {action}=await params;
    const sellerId=new URL(req.url).searchParams.get('seller_id');
    if(!/^[0-9]+$/.test(sellerId||''))return Response.json({error:'Selecione uma conta Mercado Livre'},{status:400});
    if(!await connection(sellerId))return Response.json({error:'Conta Mercado Livre não vinculada'},{status:404});
-   const orders=await checked(db().from('meli_orders').select('order_id,status,created_at,gross_amount,sale_fees,payment_status,payout_status,raw').eq('seller_id',sellerId).order('created_at',{ascending:false}).limit(500));
-   const {count,error}=await db().from('meli_orders').select('id',{count:'exact',head:true}).eq('seller_id',sellerId);if(error)throw Error(error.message);
+   const qs=new URL(req.url).searchParams;
+   const start=qs.get('dateStart'),end=qs.get('dateEnd');
+   const validDates=start&&end&&/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(start)&&/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(end)&&start<=end;
+   if((start||end)&&!validDates)return Response.json({error:'Datas inválidas para consultar pedidos'},{status:400});
+   const first=start+'T00:00:00.000Z',last=new Date(Date.parse(end+'T00:00:00Z')+86400000-1).toISOString();
+   let orderQuery=db().from('meli_orders').select('order_id,status,created_at,gross_amount,sale_fees,payment_status,payout_status,raw').eq('seller_id',sellerId);
+   let countQuery=db().from('meli_orders').select('id',{count:'exact',head:true}).eq('seller_id',sellerId);
+   if(validDates){orderQuery=orderQuery.gte('created_at',first).lte('created_at',last);countQuery=countQuery.gte('created_at',first).lte('created_at',last)}
+   const orders=await checked(orderQuery.order('created_at',{ascending:false}).limit(500));
+   const {count,error}=await countQuery;if(error)throw Error(error.message);
    const rows=orders.map(o=>{
     const raw=o.raw||{}, payments=Array.isArray(raw.payments)?raw.payments:[];
     const paymentNet=payments.length&&payments.every(p=>Number.isFinite(Number(p.transaction_details?.net_received_amount))&&p.transaction_details?.net_received_amount!==null)
