@@ -37,6 +37,14 @@ export async function GET(req,{params}){
    try{await checked(db().from('shopee_releases').select('shop_id').limit(1));releasesReady=true}catch(e){}
    return Response.json({configured:configured(),connected:shops.length>0,shops,migrationReady,releasesReady});
   }
+  if(action==='credits'){
+   const p=new URL(req.url).searchParams,shopId=p.get('shop_id'),start=p.get('dateStart'),end=p.get('dateEnd'),offset=Number(p.get('offset')||0);
+   if(!/^[0-9]+$/.test(shopId||'')||!/^\d{4}-\d{2}-\d{2}$/.test(start||'')||!/^\d{4}-\d{2}-\d{2}$/.test(end||'')||start>end||!Number.isInteger(offset)||offset<0||offset>100000)return Response.json({error:'Loja, período ou página inválida'},{status:400});
+   if(!await shopConnection(shopId))return Response.json({error:'Loja Shopee não vinculada'},{status:404});
+   const {data,error,count}=await db().from('shopee_releases').select('order_sn,released_amount,released_at',{count:'exact'}).eq('shop_id',shopId).gte('released_at',start+'T00:00:00Z').lte('released_at',new Date(Date.parse(end+'T00:00:00Z')+86400000-1).toISOString()).order('released_at',{ascending:false}).order('order_sn',{ascending:false}).range(offset,offset+99);
+   if(error)throw Error('Não foi possível carregar os créditos armazenados');
+   return Response.json({credits:data||[],total:count||0,nextOffset:offset+(data||[]).length});
+  }
   if(action==='orders'){
    const shopId=new URL(req.url).searchParams.get('shop_id');
    if(!/^[0-9]+$/.test(shopId||''))return Response.json({error:'Selecione uma loja Shopee'},{status:400});
@@ -106,7 +114,8 @@ export async function POST(req,{params}){
    const periodEnd=new Date(Date.parse(end+'T00:00:00Z')+86400000-1).toISOString();
    const orders=await checked(db().from('shopee_orders').select('order_sn').eq('shop_id',c.shop_id).gte('create_time',start+'T00:00:00.000Z').lte('create_time',periodEnd).order('create_time',{ascending:false}).order('order_sn',{ascending:false}).range(offset,offset+9));
    let ok=0,unavailable=0;
-   for(const o of orders){
+   for(let batch=0;batch<orders.length;batch+=5){
+    await Promise.all(orders.slice(batch,batch+5).map(async o=>{
     try{
      const r=await shopGet('/api/v2/payment/get_escrow_detail',{order_sn:o.order_sn},c);
      const income=r.order_income||{};
@@ -119,6 +128,7 @@ export async function POST(req,{params}){
      unavailable++;
      await checked(db().from('shopee_orders').update({financial_status:'pendente',last_checked_at:new Date().toISOString()}).eq('shop_id',c.shop_id).eq('order_sn',o.order_sn));
     }
+    }));
    }
    return Response.json({processed:orders.length,ok,unavailable,offset:offset+orders.length,complete:orders.length<10});
   }
