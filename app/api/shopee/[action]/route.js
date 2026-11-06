@@ -71,6 +71,21 @@ export async function POST(req,{params}){
    if(rows.length)await checked(db().from('shopee_orders').upsert(rows,{onConflict:'shop_id,order_sn',ignoreDuplicates:false}));
    return Response.json({processed:rows.length,cursor:info.next_cursor||'',more:!!info.more});
   }
+  if(action==='releases'){
+   const body=await req.json().catch(()=>({}));
+   const c=await activeShop(body.shop_id);
+   const from=Number(body.timeFrom),to=Number(body.timeTo),page=Number(body.page||1);
+   if(!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||to<=from||to-from>7*86400||to>Math.floor(Date.now()/1000)+60||!Number.isInteger(page)||page<1||page>100)
+    return Response.json({error:'Intervalo ou página inválida para consultar liberações da Shopee'},{status:400});
+   const result=await shopGet('/api/v2/payment/get_escrow_list',{release_time_from:from,release_time_to:to,page_size:100,page_no:page},c);
+   if(!Array.isArray(result.escrow_list))throw Error('Shopee não retornou uma lista válida de liberações');
+   const items=result.escrow_list.filter(x=>x.order_sn&&x.payout_amount!==undefined&&x.escrow_release_time).map(x=>({
+     shop_id:c.shop_id,order_sn:String(x.order_sn),released_amount:round(x.payout_amount),
+     released_at:new Date(Number(x.escrow_release_time)*1000).toISOString(),source:'shopee_get_escrow_list',checked_at:new Date().toISOString()
+   }));
+   if(items.length)await checked(db().from('shopee_releases').upsert(items,{onConflict:'shop_id,order_sn'}));
+   return Response.json({processed:items.length,more:!!result.more,page,period:'liberacao_carteira',sample:items.length?items[0].released_at:null});
+  }
   if(action==='finance'){
    const body=await req.json().catch(()=>({})),c=await activeShop(body.shop_id),offset=Number(body.offset||0);
    if(!Number.isInteger(offset)||offset<0||offset>10000)return Response.json({error:'Offset inválido'},{status:400});
