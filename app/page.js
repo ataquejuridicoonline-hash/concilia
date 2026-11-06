@@ -69,7 +69,7 @@ export default function Page(){
    }else{
     const d=await req(a,'POST');if(d.url)window.location.href=d.url;else await load();
    }
-  }catch(e){setError(e.message)}finally{setBusy(false)}
+  }catch(e){setError(e.message)}finally{setBusy(false);if(a!=='start')window.dispatchEvent(new Event('concilia-data-updated'))}
  }
 
  const visibleOrders=onlyDifferences?orders.filter(o=>o.finance_difference!==null&&Math.abs(Number(o.finance_difference))>0.05):orders;

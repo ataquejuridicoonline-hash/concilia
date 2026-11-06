@@ -112,7 +112,7 @@ export default function ShopeePanel({token}){
     if(!complete)setError('Consulta limitada aos primeiros 10.000 pedidos.');
    }
    await load();
-  }catch(e){setError(e.message)}finally{setBusy(false)}
+  }catch(e){setError(e.message)}finally{setBusy(false);if(['sync','finance','releases'].includes(which))window.dispatchEvent(new Event('concilia-data-updated'))}
  }
  return <section className="card" style={{marginTop:20}}>
   <div className="sectiontitle"><div><h2>Shopee — Conciliação</h2><small>Integração em preparação para aprovação Go-Live</small></div><span className="tag">{status?.connected?'LOJA CONECTADA':status?.configured?'PRONTA PARA AUTORIZAR':'AGUARDANDO CREDENCIAIS'}</span></div>
