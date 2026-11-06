@@ -6,8 +6,9 @@ function fail(e){return Response.json({error:e.message||'Erro inesperado'},{stat
 export async function GET(req,{params}){
  const {action}=await params;
  if(action==='callback'){
-  const u=new URL(req.url),home=new URL('/',process.env.APP_URL||u.origin);
-  const back=code=>{home.searchParams.set('shopee',code);const response=Response.redirect(home,303);response.headers.append('Set-Cookie','shopee_oauth=; Path=/api/shopee; Max-Age=0; HttpOnly; Secure; SameSite=Lax');return response};
+  // Redirect sempre usa a origem pública da rota; configuração APP_URL inválida não deve causar HTTP 500.
+  const u=new URL(req.url);
+  const back=code=>{const home=new URL('/',u.origin);home.searchParams.set('shopee',code);const response=Response.redirect(home,303);response.headers.append('Set-Cookie','shopee_oauth=; Path=/api/shopee; Max-Age=0; HttpOnly; Secure; SameSite=Lax');return response};
   try{
    const cookie=req.headers.get('cookie')?.split(';').map(x=>x.trim()).find(x=>x.startsWith('shopee_oauth='))?.split('=')[1];
    const code=u.searchParams.get('code'),shopId=u.searchParams.get('shop_id');
@@ -15,10 +16,16 @@ export async function GET(req,{params}){
    const rows=await checked(db().from('shopee_auth_states').delete().eq('state_hash',hash(cookie)).gt('expires_at',new Date().toISOString()).select('state_hash'));
    if(rows.length!==1)return back('autorizacao_expirada');
    const c=cfg(),t=await publicPost('/api/v2/auth/token/get',{code,partner_id:c.id,shop_id:Number(shopId)});
-   if(!t.access_token||!t.refresh_token||!t.shop_id_list?.map(String).includes(shopId))return back('token_invalido');
+   if(!t.access_token||!t.refresh_token)return back('token_invalido');
+   // A resposta do endpoint auth/token/get pode não incluir shop_id_list.
+   const shops=Array.isArray(t.shop_id_list)?t.shop_id_list.map(String):null;
+   if(shops&&!shops.includes(shopId))return back('loja_divergente');
    await checked(db().from('shopee_connections').upsert({shop_id:Number(shopId),access_token_cipher:seal(t.access_token),refresh_token_cipher:seal(t.refresh_token),expires_at:new Date(Date.now()+(Number(t.expire_in)||14400)*1000).toISOString(),updated_at:new Date().toISOString()},{onConflict:'shop_id'}));
    return back('conectado');
-  }catch(e){return back('falha_autorizacao')}
+  }catch(e){
+   console.error('[Shopee callback]',String(e?.message||e).slice(0,200));
+   return back('falha_autorizacao')
+  }
  }
  if(!await admin(req))return Response.json({error:'Não autorizado'},{status:401});
  try{
