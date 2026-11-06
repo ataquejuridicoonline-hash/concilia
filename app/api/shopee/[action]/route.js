@@ -32,7 +32,9 @@ export async function GET(req,{params}){
   if(action==='status'){
    let shops=[],migrationReady=true;
    try{shops=await checked(db().from('shopee_connections').select('shop_id,connected_at').order('connected_at',{ascending:true}))}catch(e){migrationReady=false}
-   return Response.json({configured:configured(),connected:shops.length>0,shops,migrationReady});
+   let releasesReady=false;
+   try{await checked(db().from('shopee_releases').select('shop_id').limit(1));releasesReady=true}catch(e){}
+   return Response.json({configured:configured(),connected:shops.length>0,shops,migrationReady,releasesReady});
   }
   if(action==='orders'){
    const shopId=new URL(req.url).searchParams.get('shop_id');
@@ -45,7 +47,11 @@ export async function GET(req,{params}){
    if(validDates)query=query.gte('create_time',start+'T00:00:00.000Z').lte('create_time',new Date(Date.parse(end+'T00:00:00Z')+86400000-1).toISOString());
    const {data,error,count}=await query.order('create_time',{ascending:false}).limit(100);
    if(error)throw Error(error.message);
-   return Response.json({orders:data||[],total:count||0});
+   const orders=data||[],ids=orders.map(x=>x.order_sn);
+   let releases=[];
+   if(ids.length)try{releases=await checked(db().from('shopee_releases').select('order_sn,released_amount,released_at').eq('shop_id',shopId).in('order_sn',ids))}catch(e){}
+   const rmap=new Map(releases.map(x=>[x.order_sn,x]));
+   return Response.json({orders:orders.map(o=>({...o,released_amount:rmap.get(o.order_sn)?.released_amount??null,released_at:rmap.get(o.order_sn)?.released_at??null})),total:count||0});
   }
   return Response.json({error:'Rota não encontrada'},{status:404});
  }catch(e){return fail(e)}
