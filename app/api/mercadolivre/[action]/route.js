@@ -54,8 +54,11 @@ export async function POST(req,{params}){const {action}=await params;if(!await a
    if(!token)return Response.json({error:'Cadastre MP_ACCESS_TOKEN (produção) como Secret na Vercel para consultar pagamentos.'},{status:400});
    const offset=Number(body.offset??0);
    if(!Number.isInteger(offset)||offset<0||offset>=10000)return Response.json({error:'Offset inválido'},{status:400});
+   const start=body.dateStart,end=body.dateEnd;
+   if(typeof start!=='string'||typeof end!=='string'||!/^\\d{4}-\\d{2}-\\d{2}$/.test(start)||!/^\\d{4}-\\d{2}-\\d{2}$/.test(end)||start>end||Date.parse(end+'T00:00:00Z')>Date.now())return Response.json({error:'Selecione datas válidas para conferir o período.'},{status:400});
+   const periodEnd=new Date(Date.parse(end+'T00:00:00.000Z')+86400000-1).toISOString();
    // Consulta controlada de 10 pedidos para evitar bloqueio e timeout.
-   const orders=await checked(db().from('meli_orders').select('order_id,seller_id,raw').eq('seller_id',c.seller_id).order('created_at',{ascending:false}).order('order_id',{ascending:false}).range(offset,offset+9));
+   const orders=await checked(db().from('meli_orders').select('order_id,seller_id,raw').eq('seller_id',c.seller_id).gte('created_at',start+'T00:00:00.000Z').lte('created_at',periodEnd).order('created_at',{ascending:false}).order('order_id',{ascending:false}).range(offset,offset+9));
    let confirmed=0,partial=0,unavailable=0;
    for(const o of orders){
     const raw=o.raw||{},payments=(Array.isArray(raw.payments)?raw.payments:[]).filter(p=>p?.id);
@@ -92,8 +95,11 @@ export async function POST(req,{params}){const {action}=await params;if(!await a
    const body=await req.json().catch(()=>({}));
    const c=await validConnection(body.seller_id);const offset=Number(body.offset??0);
    if(!Number.isInteger(offset)||offset<0||offset>=10000)return Response.json({error:'Offset inválido'},{status:400});
+   const start=body.dateStart,end=body.dateEnd;
+   if(typeof start!=='string'||typeof end!=='string'||!/^\\d{4}-\\d{2}-\\d{2}$/.test(start)||!/^\\d{4}-\\d{2}-\\d{2}$/.test(end)||start>end||Date.parse(end+'T00:00:00Z')>Date.now())return Response.json({error:'Selecione datas válidas para conferir o período.'},{status:400});
+   const periodEnd=new Date(Date.parse(end+'T00:00:00.000Z')+86400000-1).toISOString();
    // Lotes pequenos evitam timeout e permitem apresentar progresso.
-   const orders=await checked(db().from('meli_orders').select('order_id,seller_id,raw').eq('seller_id',c.seller_id).order('created_at',{ascending:false}).order('order_id',{ascending:false}).range(offset,offset+14));
+   const orders=await checked(db().from('meli_orders').select('order_id,seller_id,raw').eq('seller_id',c.seller_id).gte('created_at',start+'T00:00:00.000Z').lte('created_at',periodEnd).order('created_at',{ascending:false}).order('order_id',{ascending:false}).range(offset,offset+14));
    const results=[];let updated=0,missing=0,failed=0;
    for(const o of orders){
     const raw=o.raw||{},shippingId=raw.shipping?.id;
