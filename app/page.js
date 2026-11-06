@@ -55,7 +55,7 @@ export default function Page(){
     for(const [index,window] of windows.entries()){
      let offset=0,complete=false,limitReached=false,total=null;
      do{
-      const d=await req('sync','POST',{offset,from:window.from,to:window.to,seller_id:selectedSeller});
+      const d=await req('sync','POST',{offset,from:window.from,to:new Date(Math.min(Date.parse(window.to),Date.now())).toISOString(),seller_id:selectedSeller});
       if(d.offset<=offset&&!d.complete&&!d.limitReached)throw Error('A paginação não avançou.');
       offset=d.offset;processed+=d.processed;total=d.total;complete=d.complete;limitReached=d.limitReached;
       setProgress('Mercado Livre: período '+(index+1)+'/'+windows.length+' • '+processed+' pedidos consultados'+(total!==null?' • '+total+' encontrados na janela':''));
