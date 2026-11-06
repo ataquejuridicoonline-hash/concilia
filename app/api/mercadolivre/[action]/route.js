@@ -119,16 +119,17 @@ export async function POST(req,{params}){const {action}=await params;if(!await a
    const body=await req.json().catch(()=>({}));
    const c=await validConnection(body.seller_id);
    const offset=Number(body.offset??0);
-   const from=body.from;
-   if(!Number.isInteger(offset)||offset<0||offset>=10000)return Response.json({error:'Offset inválido ou limite de paginação alcançado. Para volumes maiores, será necessário dividir por período.'},{status:400});
-   if(typeof from!=='string'||!Number.isFinite(Date.parse(from))||Date.now()-Date.parse(from)>8*86400000||Date.parse(from)>Date.now())return Response.json({error:'Data inicial inválida'},{status:400});
+   const from=body.from,to=body.to;
+   if(!Number.isInteger(offset)||offset<0||offset>=10000)return Response.json({error:'Offset inválido ou limite de paginação alcançado. Divida o período em janelas menores.'},{status:400});
+   const f=Date.parse(from),t=Date.parse(to);
+   if(typeof from!=='string'||typeof to!=='string'||!Number.isFinite(f)||!Number.isFinite(t)||t<f||t-f>7*86400000||f>Date.now()+60000||t>Date.now()+86400000) return Response.json({error:'Período inválido. Utilize uma janela de até 7 dias, sem datas futuras.'},{status:400});
    const inserted=await checked(db().from('meli_sync_runs').insert({seller_id:c.seller_id,status:'running'}).select('id').single());
    const run=inserted.id;
    try{
     let processed=0,current=offset,total=null,complete=false;
     // Até quatro páginas por requisição para reduzir risco de timeout na Vercel.
     for(let page=0;page<4;page++){
-     const qs=new URLSearchParams({seller:String(c.seller_id),limit:'50',offset:String(current),'order.date_created.from':from,sort:'date_desc'});
+     const qs=new URLSearchParams({seller:String(c.seller_id),limit:'50',offset:String(current),'order.date_created.from':from,'order.date_created.to':to,sort:'date_desc'});
      const response=await meli('/orders/search?'+qs,c.accessToken);
      const results=response.results||[];
      if(Number.isFinite(Number(response.paging?.total)))total=Number(response.paging.total);
