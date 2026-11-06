@@ -22,3 +22,13 @@
 .ads-cards{margin:0}
 .ads-controls button{white-space:nowrap}
 @media(max-width:640px){.platform-nav .platform-tab{flex:1 1 31%;font-size:13px}.ads-controls select{flex:1 1 45%}.ads-controls button{width:100%}.ads-cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+/* Calendário para reconciliação retroativa */
+.history-range{margin:14px 0 18px;padding:18px!important}
+.history-range strong{display:block;margin-bottom:12px}
+.history-inputs{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px}
+.history-inputs label{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:650;color:#344054}
+.history-inputs input[type=date]{height:40px;min-width:165px;background:#fff;color:#1d2939;border:1px solid #cbd5e1;border-radius:9px;padding:7px 10px;font:inherit}
+.history-inputs button{min-height:40px}
+.history-range small{color:#667085;line-height:1.5}
+@media(max-width:640px){.history-inputs label{flex:1 1 45%}.history-inputs input[type=date]{min-width:0;width:100%}.history-inputs button{width:100%}}
