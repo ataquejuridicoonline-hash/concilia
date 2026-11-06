@@ -42,8 +42,10 @@ export async function GET(req,{params}){const {action}=await params;
     const shipping=raw.__concilia_shipping;
     const shippingCost=shipping?.status==='ok'&&Number.isFinite(Number(shipping.cost))?Number(shipping.cost):null;
     const netAfterShipping=preview!==null&&shippingCost!==null?Math.round((preview-shippingCost)*100)/100:null;
+    const paymentNetNum=mp?.status==='consultado'&&mp.net_amount!==null&&mp.net_amount!==undefined&&Number.isFinite(Number(mp.net_amount))?Number(mp.net_amount):null;
+    const financeDifference=netAfterShipping!==null&&paymentNetNum!==null?Math.round((netAfterShipping-paymentNetNum)*100)/100:null;
     const {raw:ignored,...publicOrder}=o;
-    return {...publicOrder,estimated_net:preview,shipping_cost:shippingCost,net_after_shipping:netAfterShipping,shipping_status:shipping?.status||'pendente',net_basis:netAfterShipping===null?'incompleto':'venda_menos_tarifa_e_frete',payment_net_reference:paymentNet,mp_status:mp?.status||'nao_consultado',mp_payment_status:mp?.payment_status||null,mp_net:mp?.net_amount??null,mp_release_date:mp?.release_date||null,mp_release_status:mp?.release_status||null,mp_payment_count:mp?.payment_count??null,mp_checked_at:mp?.checked_at||null};
+    return {...publicOrder,estimated_net:preview,shipping_cost:shippingCost,net_after_shipping:netAfterShipping,shipping_status:shipping?.status||'pendente',net_basis:netAfterShipping===null?'incompleto':'venda_menos_tarifa_e_frete',payment_net_reference:paymentNet,mp_status:mp?.status||'nao_consultado',mp_payment_status:mp?.payment_status||null,mp_net:mp?.net_amount??null,mp_release_date:mp?.release_date||null,mp_release_status:mp?.release_status||null,mp_payment_count:mp?.payment_count??null,mp_checked_at:mp?.checked_at||null,finance_difference:financeDifference};
    });
    return Response.json({orders:rows,totalStored:count??rows.length});
   }
