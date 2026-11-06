@@ -5,8 +5,8 @@ import {todayUTC,daysAgoUTC,historyWindows} from '../lib/historyDates.js';
 const money=n=>n===null||n===undefined?'—':Number(n).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 export default function ShopeePanel({token}){
  const [view,setView]=useState('sales'),[differenceFilter,setDifferenceFilter]=useState('all');
- const visibleOrders=orders.filter(o=>differenceFilter==='all'||compareShopeeAmounts(o).status===differenceFilter);
  const [nextOffset,setNextOffset]=useState(0),[releaseSummary,setReleaseSummary]=useState(null),[rangeStart,setRangeStart]=useState(daysAgoUTC(7)),[rangeEnd,setRangeEnd]=useState(todayUTC()),[selectedShop,setSelectedShop]=useState(''),[status,setStatus]=useState(null),[orders,setOrders]=useState([]),[total,setTotal]=useState(0),[error,setError]=useState(''),[progress,setProgress]=useState(''),[busy,setBusy]=useState(false);
+ const visibleOrders=orders.filter(o=>differenceFilter==='all'||compareShopeeAmounts(o).status===differenceFilter);
  async function call(action,method='GET',body,shopParam,dates){
   const response=await fetch('/api/shopee/'+action+(shopParam?'?shop_id='+encodeURIComponent(shopParam):'')+(dates?'&dateStart='+encodeURIComponent(dates.start)+'&dateEnd='+encodeURIComponent(dates.end)+'&offset='+encodeURIComponent(dates.offset||0):''),{method,credentials:'same-origin',headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,cache:'no-store'});
   const data=await response.json().catch(()=>({}));
