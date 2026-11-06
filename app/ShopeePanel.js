@@ -4,8 +4,8 @@ import {todayUTC,daysAgoUTC,historyWindows} from '../lib/historyDates.js';
 const money=n=>n===null||n===undefined?'—':Number(n).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 export default function ShopeePanel({token}){
  const [rangeStart,setRangeStart]=useState(daysAgoUTC(7)),[rangeEnd,setRangeEnd]=useState(todayUTC()),[selectedShop,setSelectedShop]=useState(''),[status,setStatus]=useState(null),[orders,setOrders]=useState([]),[total,setTotal]=useState(0),[error,setError]=useState(''),[progress,setProgress]=useState(''),[busy,setBusy]=useState(false);
- async function call(action,method='GET',body,shopParam){
-  const response=await fetch('/api/shopee/'+action+(shopParam?'?shop_id='+encodeURIComponent(shopParam):''),{method,credentials:'same-origin',headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,cache:'no-store'});
+ async function call(action,method='GET',body,shopParam,dates){
+  const response=await fetch('/api/shopee/'+action+(shopParam?'?shop_id='+encodeURIComponent(shopParam):'')+(dates?'&dateStart='+encodeURIComponent(dates.start)+'&dateEnd='+encodeURIComponent(dates.end):''),{method,credentials:'same-origin',headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,cache:'no-store'});
   const data=await response.json().catch(()=>({}));
   if(!response.ok)throw Error(data.error||'Erro ao consultar Shopee');return data;
  }
@@ -19,9 +19,9 @@ export default function ShopeePanel({token}){
    else {setOrders([]);setTotal(0)}
   }catch(e){setError(e.message)}
  }
- async function loadShop(id){
+ async function loadShop(id,start=rangeStart,end=rangeEnd){
   if(!id){setOrders([]);setTotal(0);return}
-  try{const data=await call('orders','GET',undefined,id);setOrders(data.orders||[]);setTotal(data.total||0);setError('')}catch(e){setError(e.message)}
+  try{const data=await call('orders','GET',undefined,id,{start,end});setOrders(data.orders||[]);setTotal(data.total||0);setError('')}catch(e){setError(e.message)}
  }
  useEffect(()=>{if(token)load()},[token]);
  useEffect(()=>{
@@ -73,11 +73,11 @@ export default function ShopeePanel({token}){
    <button className="secondary" disabled={busy||!selectedShop} onClick={()=>run('finance')}>Conferir valores do período</button>
    <small>{selectedShop?'Loja selecionada: '+selectedShop:''}</small>
   </div>
-  <div className="history-range"><strong>Importação retroativa — Shopee</strong><div className="history-inputs"><label>Data inicial<input type="date" value={rangeStart} max={todayUTC()} disabled={busy} onChange={e=>setRangeStart(e.target.value)}/></label><label>Data final<input type="date" value={rangeEnd} max={todayUTC()} disabled={busy} onChange={e=>setRangeEnd(e.target.value)}/></label><button disabled={busy||!selectedShop} onClick={()=>run('sync',{start:rangeStart,end:rangeEnd})}>Importar período selecionado</button></div><small>Pesquisa por data de criação, dividida em janelas de até 7 dias (UTC). Histórico disponível depende dos limites da API Shopee. O botão Conferir valores consulta os pedidos já importados neste período.</small></div>
+  <div className="history-range"><strong>Importação retroativa — Shopee</strong><div className="history-inputs"><label>Data inicial<input type="date" value={rangeStart} max={todayUTC()} disabled={busy} onChange={e=>setRangeStart(e.target.value)}/></label><label>Data final<input type="date" value={rangeEnd} max={todayUTC()} disabled={busy} onChange={e=>setRangeEnd(e.target.value)}/></label><button disabled={busy||!selectedShop} onClick={()=>run('sync',{start:rangeStart,end:rangeEnd})}>Importar período selecionado</button><button className="secondary" disabled={busy||!selectedShop} onClick={()=>loadShop(selectedShop)}>Ver relatório do período</button></div><small>Pesquisa por data de criação, dividida em janelas de até 7 dias (UTC). Histórico disponível depende dos limites da API Shopee. O botão Conferir valores consulta os pedidos já importados neste período.</small></div>
   {!status?.migrationReady&&<p className="notice">Falta executar o SQL de preparação do Supabase: supabase/shopee.sql.</p>}
   {progress&&<p className="notice" role="status">{progress}</p>}
   {error&&<p className="error">{error}</p>}
-  <p className="notice">Pedidos armazenados: {total}. Os valores de escrow são previsões de recebimento e podem mudar até a finalização. Não são comprovantes de repasse ou depósito.</p>
+  <p className="notice">Pedidos encontrados no período: {total}. Os valores de escrow são previsões de recebimento e podem mudar até a finalização. Não são comprovantes de repasse ou depósito.</p>
   <div className="scroll"><table><thead><tr><th>Pedido Shopee</th><th>Status</th><th>Compra do cliente</th><th>Escrow previsto</th><th>Após ajustes</th><th>Conferência</th></tr></thead><tbody>
    {orders.length?orders.map(o=><tr key={o.order_sn}><td>{o.order_sn}</td><td>{o.order_status||'—'}</td><td>{money(o.buyer_total)}</td><td><strong>{money(o.escrow_amount)}</strong></td><td>{money(o.escrow_after_adjustment)}</td><td>{o.financial_status==='valor_esperado'?'Previsto, não liberado':'Pendente'}</td></tr>):<tr><td colSpan="6">Nenhum pedido Shopee importado.</td></tr>}
   </tbody></table></div>
