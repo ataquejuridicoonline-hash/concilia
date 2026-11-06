@@ -1,3 +1,4 @@
+import {receiptTiming} from '../../../../lib/shopeeReceiptTiming.js';
 import {syncOrderPage} from '../../../../lib/shopeeSync.js';
 import crypto from 'node:crypto';
 import {admin,db,checked,hash,seal} from '../../../../lib/server.js';
@@ -36,6 +37,21 @@ export async function GET(req,{params}){
    let releasesReady=false;
    try{await checked(db().from('shopee_releases').select('shop_id').limit(1));releasesReady=true}catch(e){}
    return Response.json({configured:configured(),connected:shops.length>0,shops,migrationReady,releasesReady});
+  }
+  if(action==='receipt-timing'){
+   const p=new URL(req.url).searchParams,shopId=p.get('shop_id'),start=p.get('dateStart'),end=p.get('dateEnd');
+   const validDate=v=>/^\d{4}-\d{2}-\d{2}$/.test(v||'')&&Number.isFinite(Date.parse(v+'T00:00:00Z'))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v;
+   if(!/^[0-9]+$/.test(shopId||'')||!validDate(start)||!validDate(end)||start>end)return Response.json({error:'Selecione uma loja e datas válidas'},{status:400});
+   if(!await shopConnection(shopId))return Response.json({error:'Loja Shopee não vinculada'},{status:404});
+   const releases=[];
+   for(let offset=0;offset<=100000;offset+=1000){
+    const page=await checked(db().from('shopee_releases').select('order_sn,released_amount,released_at').eq('shop_id',shopId).gte('released_at',start+'T00:00:00Z').lte('released_at',new Date(Date.parse(end+'T00:00:00Z')+86400000-1).toISOString()).order('released_at',{ascending:false}).order('order_sn',{ascending:false}).range(offset,offset+999));
+    releases.push(...page);if(page.length<1000)break;
+    if(offset===100000)throw Error('Período muito extenso para calcular o prazo; reduza as datas');
+   }
+   const ids=[...new Set(releases.map(r=>r.order_sn))],orders=[];
+   for(let offset=0;offset<ids.length;offset+=100)orders.push(...await checked(db().from('shopee_orders').select('order_sn,create_time').eq('shop_id',shopId).in('order_sn',ids.slice(offset,offset+100))));
+   return Response.json({...receiptTiming(releases,orders),dateStart:start,dateEnd:end,basis:'criacao_pedido_ate_credito_carteira'});
   }
   if(action==='credits'){
    const p=new URL(req.url).searchParams,shopId=p.get('shop_id'),start=p.get('dateStart'),end=p.get('dateEnd'),offset=Number(p.get('offset')||0);
