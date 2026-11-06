@@ -4,7 +4,8 @@ import {compareShopeeAmounts} from '../lib/shopeeComparison.js';
 import {todayUTC,daysAgoUTC,historyWindows} from '../lib/historyDates.js';
 const money=n=>n===null||n===undefined?'—':Number(n).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
 export default function ShopeePanel({token}){
- const [view,setView]=useState('sales');
+ const [view,setView]=useState('sales'),[differenceFilter,setDifferenceFilter]=useState('all');
+ const visibleOrders=orders.filter(o=>differenceFilter==='all'||compareShopeeAmounts(o).status===differenceFilter);
  const [nextOffset,setNextOffset]=useState(0),[releaseSummary,setReleaseSummary]=useState(null),[rangeStart,setRangeStart]=useState(daysAgoUTC(7)),[rangeEnd,setRangeEnd]=useState(todayUTC()),[selectedShop,setSelectedShop]=useState(''),[status,setStatus]=useState(null),[orders,setOrders]=useState([]),[total,setTotal]=useState(0),[error,setError]=useState(''),[progress,setProgress]=useState(''),[busy,setBusy]=useState(false);
  async function call(action,method='GET',body,shopParam,dates){
   const response=await fetch('/api/shopee/'+action+(shopParam?'?shop_id='+encodeURIComponent(shopParam):'')+(dates?'&dateStart='+encodeURIComponent(dates.start)+'&dateEnd='+encodeURIComponent(dates.end)+'&offset='+encodeURIComponent(dates.offset||0):''),{method,credentials:'same-origin',headers:{Authorization:'Bearer '+token,...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,cache:'no-store'});
@@ -23,11 +24,24 @@ export default function ShopeePanel({token}){
  }
  async function loadShop(id,start=rangeStart,end=rangeEnd,offset=0){
   if(!id){setOrders([]);setTotal(0);return}
-  try{const data=await call('orders','GET',undefined,id,{start,end,offset});setOrders(old=>offset?[...old,...(data.orders||[])]:data.orders||[]);setNextOffset(data.nextOffset||0);setTotal(data.total||0);setView('sales');setError('');return data}catch(e){setError(e.message);throw e}
+  try{const data=await call('orders','GET',undefined,id,{start,end,offset});setOrders(old=>offset?[...old,...(data.orders||[])]:data.orders||[]);setNextOffset(data.nextOffset||0);setTotal(data.total||0);setView('sales');if(!offset)setDifferenceFilter('all');setError('');return data}catch(e){setError(e.message);throw e}
  }
  async function loadCredits(offset=0){
   const data=await call('credits','GET',undefined,selectedShop,{start:rangeStart,end:rangeEnd,offset});
-  setOrders(old=>offset?[...old,...data.credits]:data.credits);setTotal(data.total);setNextOffset(data.nextOffset);setView('credits');
+  setOrders(old=>offset?[...old,...data.credits]:data.credits);setTotal(data.total);setNextOffset(data.nextOffset);setView('credits');if(!offset)setDifferenceFilter('all');return data;
+ }
+ async function filterDifferences(value){
+  setDifferenceFilter(value);
+  if(value==='all'||nextOffset>=total)return;
+  setBusy(true);setError('');
+  try{
+   let offset=nextOffset;
+   while(offset<total){
+    const data=await (view==='credits'?loadCredits(offset):loadShop(selectedShop,rangeStart,rangeEnd,offset));
+    if(data.nextOffset<=offset)throw Error('Não foi possível carregar o período completo para filtrar.');
+    offset=data.nextOffset;
+   }
+  }catch(e){setDifferenceFilter('all');setError(e.message)}finally{setBusy(false)}
  }
  useEffect(()=>{if(token)load()},[token]);
  useEffect(()=>{
@@ -112,8 +126,9 @@ export default function ShopeePanel({token}){
   <p className="notice">A diferença é o recebido na carteira menos o valor após ajustes. Valores negativos indicam recebimento menor; positivos, maior. Só comparamos quando os dois valores estão disponíveis. Créditos podem ocorrer após o mês da venda.</p>
   <div className="sectiontitle"><div><h3>Comparação por pedido</h3><small>{view==='credits'?'Período pela data do recebimento na carteira':'Período pela data da venda'} • {total} registros</small></div><span className="tag">Após ajustes → Recebido → Diferença</span></div>
 
+  <div className="store-switch" style={{marginBottom:14}}><label htmlFor="shopee-difference">Diferença</label><select id="shopee-difference" value={differenceFilter} disabled={busy} onChange={e=>filterDifferences(e.target.value)}><option value="all">Todos</option><option value="divergente">Com diferença</option><option value="confere">Sem diferença</option><option value="pendente">Sem dados para comparar</option></select><small>{busy&&differenceFilter!=='all'?'Carregando o período completo para filtrar…':visibleOrders.length+' exibidos de '+orders.length+' carregados'}{differenceFilter!=='all'?' • tolerância de R$ 0,05':''}</small></div>
   <div className="scroll"><table><thead><tr><th>Pedido Shopee</th><th>Status</th><th>Compra do cliente</th><th>Previsto pela Shopee</th><th>Após ajustes</th><th>Recebido na carteira</th><th>Diferença</th><th>Conferência</th></tr></thead><tbody>
-   {orders.length?orders.map(o=>{const comparison=compareShopeeAmounts(o);return <tr key={o.order_sn}><td>{o.order_sn}</td><td>{o.order_status||'—'}</td><td>{money(o.buyer_total)}</td><td>{money(o.escrow_amount)}</td><td><strong>{money(o.escrow_after_adjustment)}</strong></td><td><strong>{money(o.released_amount)}</strong><br/><small>{o.released_at?'Recebido '+new Date(o.released_at).toLocaleDateString('pt-BR',{timeZone:'UTC'}):'Recebimento não localizado'}</small></td><td style={{color:comparison.status==='divergente'?'#b42318':comparison.status==='confere'?'#16794b':undefined}}><strong>{money(comparison.difference)}</strong></td><td>{comparison.label}</td></tr>}):<tr><td colSpan="8">{view==='credits'?'Nenhum recebimento armazenado no período.':'Nenhum pedido Shopee importado no período.'}</td></tr>}
+   {visibleOrders.length?visibleOrders.map(o=>{const comparison=compareShopeeAmounts(o);return <tr key={o.order_sn}><td>{o.order_sn}</td><td>{o.order_status||'—'}</td><td>{money(o.buyer_total)}</td><td>{money(o.escrow_amount)}</td><td><strong>{money(o.escrow_after_adjustment)}</strong></td><td><strong>{money(o.released_amount)}</strong><br/><small>{o.released_at?'Recebido '+new Date(o.released_at).toLocaleDateString('pt-BR',{timeZone:'UTC'}):'Recebimento não localizado'}</small></td><td style={{color:comparison.status==='divergente'?'#b42318':comparison.status==='confere'?'#16794b':undefined}}><strong>{money(comparison.difference)}</strong></td><td>{comparison.label}</td></tr>}):<tr><td colSpan="8">{differenceFilter!=='all'?'Nenhum pedido corresponde ao filtro selecionado.':view==='credits'?'Nenhum recebimento armazenado no período.':'Nenhum pedido Shopee importado no período.'}</td></tr>}
 
   </tbody></table></div>
   {nextOffset<total&&<button className="secondary" disabled={busy} onClick={()=>(view==='credits'?loadCredits(nextOffset):loadShop(selectedShop,rangeStart,rangeEnd,nextOffset)).catch(e=>setError(e.message))}>Carregar mais 100 registros ({orders.length} de {total})</button>}
