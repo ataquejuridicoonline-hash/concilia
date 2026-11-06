@@ -30,7 +30,24 @@ export async function GET(req){
   }
   const [orders,{count,error}]=await Promise.all([checked(query),countQuery]);
   if(error)throw Error(error.message);
-  const rows=(orders||[]).map(platform==='meli'?auditMeli:auditShopee);
+  let rows=(orders||[]).map(platform==='meli'?auditMeli:auditShopee);
+  if(platform==='shopee'&&rows.length){
+   const ids=rows.map(x=>x.id);
+   const releases=await checked(db().from('shopee_releases').select('order_sn,released_amount,released_at,source').eq('shop_id',store).in('order_sn',ids));
+   const index=new Map(releases.map(x=>[x.order_sn,x]));
+   rows=rows.map(x=>{
+    const p=index.get(x.id);if(!p)return x;
+    const platformReleased=Number(p.released_amount);
+    const difference=x.expected===null?null:Math.round((x.expected-platformReleased)*100)/100;
+    return {...x,platformReleased,difference,releaseStatus:'credito_carteira',releaseDate:p.released_at,
+     classification:difference===null?'pendente':Math.abs(difference)>0.05?'divergencia':'conferido_plataforma',
+     evidence:'Shopee get_escrow_list: crédito na carteira; não comprova depósito bancário',
+     causes:difference===null?['Crédito na carteira confirmado; falta calcular o valor esperado.']:
+      Math.abs(difference)>0.05?['Diferença entre escrow esperado e crédito na carteira: conferir tarifas, ajustes, devoluções ou estornos.']:
+      ['Crédito na carteira coincide com o esperado; transferência bancária não conciliada.']
+    };
+   });
+  }
   return Response.json({platform,store,start,end,total:count??0,offset,nextOffset:offset+rows.length,complete:offset+rows.length>=(count??0),rows,limitations:'Esta consulta audita apenas os pedidos armazenados no Concilia. Liberação na plataforma não comprova transferência bancária. Ausência de evidência não é prova de ausência de pagamento.'});
  }catch(e){return Response.json({error:e.message||'Erro na auditoria'},{status:500})}
 }
