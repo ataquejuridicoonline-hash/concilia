@@ -38,13 +38,13 @@ export default function ShopeePanel({token}){
    if(which==='start'){const data=await call('start','POST');window.location.assign(data.url);return}
    if(which==='sync'){
     const start=range?.start||daysAgoUTC(7),end=range?.end||todayUTC();
-    const windows=historyWindows(start,end);
+    const windows=historyWindows(start,end),syncUntil=Math.floor(Date.now()/1000);
     setRangeStart(start);setRangeEnd(end);
     let count=0,stored=0;
     for(const [index,w] of windows.entries()){
      let cursor='',pages=0,more=true;
      while(more&&pages<100){
-      const data=await call('sync','POST',{timeFrom:w.timeFrom,timeTo:Math.min(w.timeTo,Math.floor(Date.now()/1000)),cursor,shop_id:selectedShop});
+      const data=await call('sync','POST',{timeFrom:w.timeFrom,timeTo:Math.min(w.timeTo,syncUntil),cursor,shop_id:selectedShop});
       pages++;count+=data.queried;stored+=data.stored;
       if(data.more&&(!data.cursor||data.cursor===cursor))throw Error('A paginação Shopee não avançou na janela '+(index+1));
       cursor=data.cursor;more=data.more;
@@ -90,7 +90,7 @@ export default function ShopeePanel({token}){
  }
  return <section className="card" style={{marginTop:20}}>
   <div className="sectiontitle"><div><h2>Shopee — Conciliação</h2><small>Integração em preparação para aprovação Go-Live</small></div><span className="tag">{status?.connected?'LOJA CONECTADA':status?.configured?'PRONTA PARA AUTORIZAR':'AGUARDANDO CREDENCIAIS'}</span></div>
-  <div className="store-switch" style={{marginBottom:14}}><label htmlFor="shopee-shop">Loja Shopee</label><select id="shopee-shop" disabled={busy} value={selectedShop} onChange={e=>{setOrders([]);setTotal(0);setNextOffset(0);setSelectedShop(e.target.value)}}><option value="">Selecione uma loja</option>{(status?.shops||[]).map(x=><option key={x.shop_id} value={String(x.shop_id)}>Loja {x.shop_id}</option>)}</select><small>{(status?.shops||[]).length} loja(s) conectada(s)</small></div><div className="actions" style={{justifyContent:'flex-start',marginBottom:16,flexWrap:'wrap'}}>
+  <div className="store-switch" style={{marginBottom:14}}><label htmlFor="shopee-shop">Loja Shopee</label><select id="shopee-shop" disabled={busy} value={selectedShop} onChange={e=>{setOrders([]);setTotal(0);setNextOffset(0);setProgress('');setError('');setReleaseSummary(null);setSelectedShop(e.target.value)}}><option value="">Selecione uma loja</option>{(status?.shops||[]).map(x=><option key={x.shop_id} value={String(x.shop_id)}>Loja {x.shop_id}</option>)}</select><small>{(status?.shops||[]).length} loja(s) conectada(s)</small></div><div className="actions" style={{justifyContent:'flex-start',marginBottom:16,flexWrap:'wrap'}}>
    <button disabled={busy||!status?.configured||!status?.migrationReady} onClick={()=>run('start')}>+ Adicionar loja Shopee</button>
    <button className="secondary" disabled={busy||!selectedShop} onClick={()=>run('sync')}>Importar 7 dias</button>
    <button className="secondary" disabled={busy||!selectedShop} onClick={()=>run('finance')}>Conferir valores do período</button>
