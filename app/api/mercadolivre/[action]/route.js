@@ -25,7 +25,7 @@ export async function GET(req,{params}){const {action}=await params;
    const start=qs.get('dateStart'),end=qs.get('dateEnd');
    const validDates=start&&end&&/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(start)&&/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(end)&&start<=end;
    if((start||end)&&!validDates)return Response.json({error:'Datas inválidas para consultar pedidos'},{status:400});
-   const first=start+'T00:00:00.000Z',last=new Date(Date.parse(end+'T00:00:00Z')+86400000-1).toISOString();
+   const first=validDates?start+'T00:00:00.000Z':null,last=validDates?new Date(Date.parse(end+'T00:00:00Z')+86400000-1).toISOString():null;
    let orderQuery=db().from('meli_orders').select('order_id,status,created_at,gross_amount,sale_fees,payment_status,payout_status,raw').eq('seller_id',sellerId);
    let countQuery=db().from('meli_orders').select('id',{count:'exact',head:true}).eq('seller_id',sellerId);
    if(validDates){orderQuery=orderQuery.gte('created_at',first).lte('created_at',last);countQuery=countQuery.gte('created_at',first).lte('created_at',last)}
