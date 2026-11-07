@@ -10,7 +10,7 @@ export async function GET(req){
    meli_orders:['order_id,seller_id,status,created_at,updated_at,gross_amount,sale_fees,payment_status,payout_status,currency_id,last_checked_at,raw','seller_id','order_id']
   };
   const p=new URL(req.url).searchParams,table=p.get('table'),offset=Number(p.get('offset')||0);
-  if(!Object.hasOwn(definitions,table)||!Number.isSafeInteger(offset)||offset<0||offset>100000)return Response.json({error:'Tabela ou página inválida'},{status:400});
+  if(!Object.hasOwn(definitions,table)||!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(offset+499))return Response.json({error:'Tabela ou página inválida'},{status:400});
   const [fields,store,id]=definitions[table];
   const page=await checked(db().from(table).select(fields).order(store).order(id).range(offset,offset+499));
   const safePage=table==='meli_orders'?page.map(({raw,...row})=>{
