@@ -68,15 +68,16 @@ export default function ShopeePanel({token}){
     let count=0,stored=0;
     for(const [index,w] of windows.entries()){
      let cursor='',pages=0,more=true;
-     while(more&&pages<100){
+     const seenCursors=new Set(['']);
+     while(more){
       const data=await call('sync','POST',{timeFrom:w.timeFrom,timeTo:Math.min(w.timeTo,syncUntil),cursor,shop_id:selectedShop});
       pages++;count+=data.queried;stored+=data.stored;
-      if(data.more&&(!data.cursor||data.cursor===cursor))throw Error('A paginação Shopee não avançou na janela '+(index+1));
+      if(data.more&&(!data.cursor||seenCursors.has(data.cursor)))throw Error('A paginação Shopee não avançou na janela '+(index+1));
       cursor=data.cursor;more=data.more;
+      if(more)seenCursors.add(cursor);
       setProgress('Shopee: janela '+(index+1)+'/'+windows.length+' • '+count+' consultados • '+stored+' gravados e confirmados');
       if(pages%5===0)await loadShop(selectedShop,start,end);
      }
-     if(more)throw Error('Importação parcial: janela '+(index+1)+' atingiu o limite de 100 páginas. Escolha um intervalo menor.');
     }
     const report=await loadShop(selectedShop,start,end);
     setReleaseSummary(null);
