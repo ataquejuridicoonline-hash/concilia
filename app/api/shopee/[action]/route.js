@@ -31,6 +31,17 @@ export async function GET(req,{params}){
  }
  if(!await admin(req))return Response.json({error:'Não autorizado'},{status:401});
  try{
+  if(action==='income-overview'){
+   const shopId=new URL(req.url).searchParams.get('shop_id');
+   if(!/^[0-9]+$/.test(shopId||''))return Response.json({error:'Loja inválida'},{status:400});
+   const c=await activeShop(shopId);
+   try{
+    const result=await shopGet('/api/v2/payment/get_income_overview',{income_status:2},c),income=result.total_income;
+    const amount=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:round(v);
+    if(!income||amount(income.pending_amount)===null)return Response.json({available:false,reason:'Resumo pendente indisponível para esta integração'},{status:502});
+    return Response.json({shop_id:c.shop_id,checked_at:new Date().toISOString(),pending_amount:amount(income.pending_amount),to_release_amount:amount(income.to_release_amount),released_amount:amount(income.released_amount),source:'shopee_get_income_overview'});
+   }catch{return Response.json({available:false,reason:'Shopee não disponibilizou o resumo de renda para esta integração'},{status:502});}
+  }
   if(action==='status'){
    let shops=[],migrationReady=true;
    try{shops=await checked(db().from('shopee_connections').select('shop_id,connected_at').order('connected_at',{ascending:true}))}catch(e){migrationReady=false}
@@ -111,6 +122,24 @@ export async function POST(req,{params}){
    const response=Response.json({url:url.toString()});
    response.headers.append('Set-Cookie','shopee_oauth='+nonce+'; Path=/api/shopee; Max-Age=600; HttpOnly; Secure; SameSite=Lax');
    return response;
+  }
+  if(action==='pending-income'){
+   const body=await req.json().catch(()=>({})),c=await activeShop(body.shop_id),cursor=body.cursor||'';
+   if(typeof cursor!=='string'||cursor.length>512)return Response.json({error:'Cursor inválido'},{status:400});
+   try{
+    const path='/api/v2/payment/get_income_detail',end=new Date().toISOString().slice(0,10),start=new Date(Date.now()-7*86400000).toISOString().slice(0,10);
+    const res=await fetch(urlFor(path,{}, {access:c.token,shop:c.shop_id}),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({income_status:2,date_from:start,date_to:end,page_size:100,cursor}),cache:'no-store'}),raw=await res.json().catch(()=>({}));
+    if(!res.ok||raw.error)throw Error('unavailable');
+    const block=(raw.response||raw).income_detail_list;
+    let items=Array.isArray(block)?block:block?.income_detail_list_item;
+    if(items&&!Array.isArray(items)&&items.order_sn)items=[items];
+    if(!Array.isArray(items))throw Error('invalid');
+    const amount=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:round(v);
+    const rows=items.map(x=>({order_sn:typeof x.order_sn==='string'&&/^[A-Za-z0-9]{1,64}$/.test(x.order_sn)?x.order_sn:null,currency:x.currency==='BRL'?'BRL':null,estimated_escrow_amount:amount(x.estimated_escrow_amount),estimated_payout_time:Number.isSafeInteger(Number(x.estimated_payout_time))&&Number(x.estimated_payout_time)>0?Number(x.estimated_payout_time):null,creation_date:Number.isSafeInteger(Number(x.creation_date))&&Number(x.creation_date)>0?Number(x.creation_date):null}));
+    const next=String(block?.next_page?.cursor||(raw.response||raw).next_page?.cursor||'');
+    if(next.length>512||next&&next===cursor)throw Error('pagination');
+    return Response.json({shop_id:c.shop_id,checked_at:new Date().toISOString(),orders:rows,cursor:next,more:!!next,source:'shopee_get_income_detail_pending'});
+   }catch{return Response.json({available:false,reason:'Shopee não disponibilizou os recebíveis pendentes para esta integração'},{status:502});}
   }
   if(action==='sync'){
    const body=await req.json().catch(()=>({})),c=await activeShop(body.shop_id);
