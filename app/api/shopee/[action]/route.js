@@ -146,7 +146,7 @@ export async function POST(req,{params}){
    if(!Array.isArray(ids)||!ids.length||ids.length>10||new Set(ids).size!==ids.length||ids.some(x=>typeof x!=='string'||! /^[A-Za-z0-9]{1,64}$/.test(x))||!validDate(body.dateStart)||!validDate(body.dateEnd)||body.dateStart>body.dateEnd)return Response.json({error:'Pedidos ou datas inválidos'},{status:400});
    const orders=await checked(db().from('shopee_orders').select('order_sn').eq('shop_id',c.shop_id).gte('create_time',body.dateStart+'T00:00:00Z').lte('create_time',new Date(Date.parse(body.dateEnd+'T00:00:00Z')+86400000-1).toISOString()).in('order_sn',ids));
    if(orders.length!==ids.length)return Response.json({error:'Pedido fora da loja ou período selecionado'},{status:400});
-   const code=v=>typeof v==='string'&&/^[A-Za-z0-9_ .:/()\-]{1,200}$/.test(v)?v:null;
+   const code=v=>typeof v==='string'&&/^[\p{L}\p{N}_ .,:;/()\-]{1,300}$/u.test(v)?v:null;
    const amount=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:round(v);
    const evidence=[];
    for(let offset=0;offset<ids.length;offset+=5)await Promise.all(ids.slice(offset,offset+5).map(async order_sn=>{
