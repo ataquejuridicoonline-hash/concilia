@@ -156,3 +156,5 @@ export default function ShopeePanel({token}){
   {nextOffset<total&&<button className="secondary" disabled={busy} onClick={()=>(view==='credits'?loadCredits(nextOffset):loadShop(selectedShop,rangeStart,rangeEnd,nextOffset)).catch(e=>setError(e.message))}>Carregar mais 100 registros ({orders.length} de {total})</button>}
  </section>
 }
+
+// Revisão direcionada: preserva positivos e cancelados fora da consulta.
