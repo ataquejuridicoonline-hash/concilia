@@ -126,20 +126,21 @@ export async function POST(req,{params}){
   if(action==='pending-income'){
    const body=await req.json().catch(()=>({})),c=await activeShop(body.shop_id),cursor=body.cursor||'';
    if(typeof cursor!=='string'||cursor.length>512)return Response.json({error:'Cursor inválido'},{status:400});
+   let diagnostic={};
    try{
     const path='/api/v2/payment/get_income_detail',end=new Date().toISOString().slice(0,10),start=new Date(Date.now()-7*86400000).toISOString().slice(0,10);
     const res=await fetch(urlFor(path,{}, {access:c.token,shop:c.shop_id}),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({income_status:2,date_from:start,date_to:end,page_size:100,cursor}),cache:'no-store'}),raw=await res.json().catch(()=>({}));
-    if(!res.ok||raw.error)throw Error('unavailable');
+    if(!res.ok||raw.error){diagnostic={provider_code:typeof raw.error==='string'&&/^[A-Za-z0-9_.-]{1,100}$/.test(raw.error)?raw.error:null,http_status:res.status};throw Error('unavailable');}
     const block=(raw.response||raw).income_detail_list;
     let items=Array.isArray(block)?block:block?.income_detail_list_item;
     if(items&&!Array.isArray(items)&&items.order_sn)items=[items];
-    if(!Array.isArray(items))throw Error('invalid');
+    if(!Array.isArray(items)){diagnostic={response_keys:Object.keys(raw.response||raw).filter(x=>/^[A-Za-z0-9_]{1,80}$/.test(x)),list_type:typeof block};throw Error('invalid');}
     const amount=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:round(v);
     const rows=items.map(x=>({order_sn:typeof x.order_sn==='string'&&/^[A-Za-z0-9]{1,64}$/.test(x.order_sn)?x.order_sn:null,currency:x.currency==='BRL'?'BRL':null,estimated_escrow_amount:amount(x.estimated_escrow_amount),estimated_payout_time:Number.isSafeInteger(Number(x.estimated_payout_time))&&Number(x.estimated_payout_time)>0?Number(x.estimated_payout_time):null,creation_date:Number.isSafeInteger(Number(x.creation_date))&&Number(x.creation_date)>0?Number(x.creation_date):null}));
     const next=String(block?.next_page?.cursor||(raw.response||raw).next_page?.cursor||'');
     if(next.length>512||next&&next===cursor)throw Error('pagination');
     return Response.json({shop_id:c.shop_id,checked_at:new Date().toISOString(),orders:rows,cursor:next,more:!!next,source:'shopee_get_income_detail_pending'});
-   }catch{return Response.json({available:false,reason:'Shopee não disponibilizou os recebíveis pendentes para esta integração'},{status:502});}
+   }catch{return Response.json({available:false,reason:'Shopee não disponibilizou os recebíveis pendentes para esta integração',diagnostic},{status:502});}
   }
   if(action==='sync'){
    const body=await req.json().catch(()=>({})),c=await activeShop(body.shop_id);
