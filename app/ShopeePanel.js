@@ -8,6 +8,7 @@ export default function ShopeePanel({token}){
  const tokenRef=useRef(token);
  tokenRef.current=token;
  const [receiptStats,setReceiptStats]=useState(null);
+ const [evidenceText,setEvidenceText]=useState('');
  const [view,setView]=useState('sales'),[differenceFilter,setDifferenceFilter]=useState('all');
  const [nextOffset,setNextOffset]=useState(0),[releaseSummary,setReleaseSummary]=useState(null),[rangeStart,setRangeStart]=useState(daysAgoUTC(7)),[rangeEnd,setRangeEnd]=useState(todayUTC()),[selectedShop,setSelectedShop]=useState(''),[status,setStatus]=useState(null),[orders,setOrders]=useState([]),[total,setTotal]=useState(0),[error,setError]=useState(''),[progress,setProgress]=useState(''),[busy,setBusy]=useState(false);
  const visibleOrders=orders.filter(o=>differenceFilter==='all'||compareShopeeAmounts(o).status===differenceFilter);
@@ -64,6 +65,24 @@ export default function ShopeePanel({token}){
   setBusy(true);setError('');
   try{
    if(which==='start'){const data=await call('start','POST');window.location.assign(data.url);return}
+   if(which==='evidence'){
+    const candidates=await call('review-candidates','GET',undefined,selectedShop,{start:rangeStart,end:rangeEnd});
+    const ids=candidates.orderSns,key='concilia-evidence-'+selectedShop+'-'+rangeStart+'-'+rangeEnd;
+    let saved;try{saved=JSON.parse(localStorage.getItem(key)||'null')}catch{}
+    const fresh=saved&&saved.shop_id===selectedShop&&saved.dateStart===rangeStart&&saved.dateEnd===rangeEnd&&Array.isArray(saved.evidence)&&Date.now()-Date.parse(saved.generated_at)<3600000;
+    const collected=fresh?saved.evidence.filter(x=>ids.includes(x.order_sn)):[],seen=new Set(collected.map(x=>x.order_sn));
+    const pending=ids.filter(x=>!seen.has(x));
+    for(let i=0;i<pending.length;i+=10){
+     const result=await call('evidence','POST',{shop_id:selectedShop,dateStart:rangeStart,dateEnd:rangeEnd,orderSns:pending.slice(i,i+10)});
+     if(result.processed!==Math.min(10,pending.length-i))throw Error('Consulta de evidências incompleta');
+     collected.push(...result.evidence);
+     const text=JSON.stringify({format:'concilia-evidence-v1',shop_id:selectedShop,dateStart:rangeStart,dateEnd:rangeEnd,generated_at:new Date().toISOString(),total:ids.length,evidence:collected});
+     setEvidenceText(text);try{localStorage.setItem(key,text)}catch{}
+     setProgress('Investigação devolução e logística: '+collected.length+'/'+ids.length+' pedidos • '+collected.filter(x=>x.finance_status==='unavailable'||x.tracking_status==='unavailable'||x.returns_status==='unavailable'||x.returns_status==='partial').length+' com alguma fonte indisponível ou parcial');
+    }
+    if(!pending.length)setEvidenceText(JSON.stringify(saved));
+    return;
+   }
    if(which==='review'){
     const candidates=await call('review-candidates','GET',undefined,selectedShop,{start:rangeStart,end:rangeEnd});
     const ids=candidates.orderSns;let done=0,ok=0,unavailable=0;
@@ -135,7 +154,7 @@ export default function ShopeePanel({token}){
   <div className="store-switch" style={{marginBottom:14}}><label htmlFor="shopee-shop">Loja Shopee</label><select id="shopee-shop" disabled={busy} value={selectedShop} onChange={e=>{setOrders([]);setTotal(0);setNextOffset(0);setProgress('');setError('');setReleaseSummary(null);setReceiptStats(null);setView('sales');setSelectedShop(e.target.value)}}><option value="">Selecione uma loja</option>{(status?.shops||[]).map(x=><option key={x.shop_id} value={String(x.shop_id)}>Loja {x.shop_id}</option>)}</select><small>{(status?.shops||[]).length} loja(s) conectada(s)</small></div><div className="actions" style={{justifyContent:'flex-start',marginBottom:16,flexWrap:'wrap'}}>
    <button disabled={busy||!status?.configured||!status?.migrationReady} onClick={()=>run('start')}>+ Adicionar loja Shopee</button>
    <button className="secondary" disabled={busy||!selectedShop} onClick={()=>run('sync')}>Importar 7 dias</button>
-   <button className="secondary" disabled={busy||!selectedShop} onClick={()=>run('finance')}>Conferir valores do período</button><button disabled={busy||!selectedShop||!status?.releasesReady} onClick={()=>run('review')}>Revisar negativos e zerados</button>
+   <button className="secondary" disabled={busy||!selectedShop} onClick={()=>run('finance')}>Conferir valores do período</button><button disabled={busy||!selectedShop||!status?.releasesReady} onClick={()=>run('review')}>Revisar negativos e zerados</button><button disabled={busy||!selectedShop||!status?.releasesReady} onClick={()=>run('evidence')}>Investigar devoluções e extravios</button>
    <small>{selectedShop?'Loja selecionada: '+selectedShop:''}</small>
   </div>
   <div className="history-range"><strong>Importação retroativa — Shopee</strong><div className="history-inputs"><label>Data inicial<input type="date" value={rangeStart} max={todayUTC()} disabled={busy} onChange={e=>{setRangeStart(e.target.value);setReleaseSummary(null);setReceiptStats(null)}}/></label><label>Data final<input type="date" value={rangeEnd} max={todayUTC()} disabled={busy} onChange={e=>{setRangeEnd(e.target.value);setReleaseSummary(null);setReceiptStats(null)}}/></label><button disabled={busy||!selectedShop} onClick={()=>run('sync',{start:rangeStart,end:rangeEnd})}>Importar período selecionado</button><button className="secondary" disabled={busy||!selectedShop} onClick={()=>loadShop(selectedShop).catch(()=>{})}>Ver relatório do período</button><button disabled={busy||!selectedShop||!status?.releasesReady} onClick={()=>run('releases')}>Consultar liberações e valores</button><button className="secondary" disabled={busy||!selectedShop||!status?.releasesReady} onClick={()=>loadCredits().catch(e=>setError(e.message))}>Ver por data de recebimento</button><button className="secondary" disabled={busy||!selectedShop||!status?.releasesReady} onClick={calculateReceiptTiming}>Calcular prazo médio</button></div><small>Pesquisa por data de criação, dividida em janelas de até 7 dias (UTC). Histórico disponível depende dos limites da API Shopee. O botão Conferir valores consulta pedidos criados no período. Consultar liberações usa a data em que a Shopee creditou o dinheiro na carteira, que pode ser posterior à venda.</small></div>
@@ -144,6 +163,7 @@ export default function ShopeePanel({token}){
   {!status?.migrationReady&&<p className="notice">Falta executar o SQL de preparação do Supabase: supabase/shopee.sql.</p>}
   {receiptStats&&<p className="notice" role="status">Recebimentos de {receiptStats.dateStart} até {receiptStats.dateEnd}: <strong>prazo médio {receiptStats.meanDays===null?'indisponível':receiptStats.meanDays.toLocaleString('pt-BR',{maximumFractionDigits:2})+' dias corridos'}</strong>, da criação do pedido ao crédito na carteira. Mediana: {receiptStats.medianDays===null?'—':receiptStats.medianDays.toLocaleString('pt-BR',{maximumFractionDigits:2})+' dias'}. Base: {receiptStats.sample} de {receiptStats.total} registros; excluídos: {receiptStats.missingDates} sem datas, {receiptStats.invalidDates} com datas inconsistentes e {receiptStats.nonPositive} lançamentos sem recebimento positivo. Considera todos os créditos armazenados no período, independentemente do filtro de diferenças. Não mede depósito bancário.</p>}
   {progress&&<p className="notice" role="status">{progress}</p>}
+  {evidenceText&&<details><summary>Cópia da investigação de devoluções e logística</summary><p>Contém somente referências dos pedidos, situações, motivos e valores informados pela Shopee. Fontes indisponíveis permanecem identificadas.</p><label>Dados da investigação<textarea aria-label="Dados da investigação" readOnly value={evidenceText} rows={5} style={{width:'100%'}}/></label></details>}
   {error&&<p className="error">{error}</p>}
   <p className="notice">A diferença é o recebido na carteira menos o valor após ajustes. Valores negativos indicam recebimento menor; positivos, maior. Só comparamos quando os dois valores estão disponíveis. Créditos podem ocorrer após o mês da venda.</p>
   <div className="sectiontitle"><div><h3>Comparação por pedido</h3><small>{view==='credits'?'Período pela data do recebimento na carteira':'Período pela data da venda'} • {total} registros</small></div><span className="tag">Após ajustes → Recebido → Diferença</span></div>
