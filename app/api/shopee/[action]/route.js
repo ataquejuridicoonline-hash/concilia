@@ -222,7 +222,7 @@ export async function POST(req,{params}){
    if(requested)query=query.in('order_sn',requested);
    const orders=await checked(query.order('create_time',{ascending:false}).order('order_sn',{ascending:false}).range(requested?0:offset,requested?9:offset+9));
    if(requested&&orders.length!==requested.length)return Response.json({error:'Pedido não pertence à loja ou período selecionado'},{status:400});
-   let ok=0,unavailable=0;
+   let ok=0,unavailable=0;const summaries=[];
    for(let batch=0;batch<orders.length;batch+=5){
     await Promise.all(orders.slice(batch,batch+5).map(async o=>{
     try{
@@ -232,14 +232,14 @@ export async function POST(req,{params}){
      const valid=net!==null&&net!==undefined&&Number.isFinite(Number(net));
      const summary=valid?{buyer_total:gross===null||gross===undefined?null:round(gross),escrow_amount:round(net),escrow_after_adjustment:adjusted===null||adjusted===undefined?null:round(adjusted),financial_status:'valor_esperado',last_checked_at:new Date().toISOString()}:{financial_status:'pendente',last_checked_at:new Date().toISOString()};
      await checked(db().from('shopee_orders').update(summary).eq('shop_id',c.shop_id).eq('order_sn',o.order_sn));
-     if(valid)ok++;else unavailable++;
+     if(valid){ok++;summaries.push({shop_id:c.shop_id,order_sn:o.order_sn,...summary});}else unavailable++;
     }catch(e){
      unavailable++;
      await checked(db().from('shopee_orders').update({financial_status:'pendente',last_checked_at:new Date().toISOString()}).eq('shop_id',c.shop_id).eq('order_sn',o.order_sn));
     }
     }));
    }
-   return Response.json({processed:orders.length,ok,unavailable,offset:offset+orders.length,complete:orders.length<10});
+   return Response.json({processed:orders.length,ok,unavailable,orders:summaries,offset:offset+orders.length,complete:orders.length<10});
   }
   return Response.json({error:'Rota não encontrada'},{status:404});
  }catch(e){return fail(e)}
