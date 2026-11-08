@@ -131,7 +131,7 @@ export async function POST(req,{params}){
     const path='/api/v2/payment/get_income_detail',end=new Date().toISOString().slice(0,10),start=new Date(Date.now()-7*86400000).toISOString().slice(0,10);
     const res=await fetch(urlFor(path,{}, {access:c.token,shop:c.shop_id}),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({income_status:2,date_from:start,date_to:end,page_size:100,cursor}),cache:'no-store'}),raw=await res.json().catch(()=>({}));
     if(!res.ok||raw.error){diagnostic={provider_code:typeof raw.error==='string'&&/^[A-Za-z0-9_.-]{1,100}$/.test(raw.error)?raw.error:null,http_status:res.status};throw Error('unavailable');}
-    const block=(raw.response||raw).income_detail_list;
+    const block=(raw.response||raw).income_detail_list||(raw.response||raw).list;
     let items=Array.isArray(block)?block:block?.income_detail_list_item;
     if(items&&!Array.isArray(items)&&items.order_sn)items=[items];
     if(!Array.isArray(items)){diagnostic={response_keys:Object.keys(raw.response||raw).filter(x=>/^[A-Za-z0-9_]{1,80}$/.test(x)),list_type:typeof block};throw Error('invalid');}
