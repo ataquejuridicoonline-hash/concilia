@@ -70,7 +70,7 @@ export default function ShopeePanel({token}){
     const ids=candidates.orderSns,key='concilia-evidence-'+selectedShop+'-'+rangeStart+'-'+rangeEnd;
     let saved;try{saved=JSON.parse(localStorage.getItem(key)||'null')}catch{}
     const fresh=saved&&saved.shop_id===selectedShop&&saved.dateStart===rangeStart&&saved.dateEnd===rangeEnd&&Array.isArray(saved.evidence)&&Date.now()-Date.parse(saved.generated_at)<3600000;
-    const collected=fresh?saved.evidence.filter(x=>ids.includes(x.order_sn)):[],seen=new Set(collected.map(x=>x.order_sn));
+    const collected=fresh?saved.evidence.filter(x=>ids.includes(x.order_sn)&&!(x.adjustments||[]).some(a=>a.reason===null)):[],seen=new Set(collected.map(x=>x.order_sn));
     const pending=ids.filter(x=>!seen.has(x));
     for(let i=0;i<pending.length;i+=10){
      const result=await call('evidence','POST',{shop_id:selectedShop,dateStart:rangeStart,dateEnd:rangeEnd,orderSns:pending.slice(i,i+10)});
