@@ -140,6 +140,47 @@ export async function POST(req,{params}){
    if(items.length)await checked(db().from('shopee_releases').upsert(items,{onConflict:'shop_id,order_sn'}));
    return Response.json({processed:items.length,totalReleased:Math.round(items.reduce((sum,x)=>sum+x.released_amount,0)*100)/100,more:!!result.more,page,period:'liberacao_carteira'});
   }
+  if(action==='evidence'){
+   const body=await req.json().catch(()=>({})),c=await activeShop(body.shop_id),ids=body.orderSns;
+   const validDate=v=>typeof v==='string'&&/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(v)&&Number.isFinite(Date.parse(v+'T00:00:00Z'))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v;
+   if(!Array.isArray(ids)||!ids.length||ids.length>10||new Set(ids).size!==ids.length||ids.some(x=>typeof x!=='string'||! /^[A-Za-z0-9]{1,64}$/.test(x))||!validDate(body.dateStart)||!validDate(body.dateEnd)||body.dateStart>body.dateEnd)return Response.json({error:'Pedidos ou datas inválidos'},{status:400});
+   const orders=await checked(db().from('shopee_orders').select('order_sn').eq('shop_id',c.shop_id).gte('create_time',body.dateStart+'T00:00:00Z').lte('create_time',new Date(Date.parse(body.dateEnd+'T00:00:00Z')+86400000-1).toISOString()).in('order_sn',ids));
+   if(orders.length!==ids.length)return Response.json({error:'Pedido fora da loja ou período selecionado'},{status:400});
+   const code=v=>typeof v==='string'&&/^[A-Za-z0-9_ .:/()\-]{1,200}$/.test(v)?v:null;
+   const amount=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:round(v);
+   const evidence=[];
+   for(let offset=0;offset<ids.length;offset+=5)await Promise.all(ids.slice(offset,offset+5).map(async order_sn=>{
+    const row={shop_id:c.shop_id,order_sn,checked_at:new Date().toISOString(),finance_status:'unavailable',tracking_status:'unavailable',returns_status:'unavailable',returns:[],adjustments:[],income:{},tracking_codes:[]};
+    const results=await Promise.allSettled([shopGet('/api/v2/payment/get_escrow_detail',{order_sn},c),shopGet('/api/v2/logistics/get_tracking_info',{order_sn},c)]);
+    if(results[1].status==='fulfilled'){
+     const track=results[1].value;row.tracking_status='queried';row.logistics_status=code(track.logistics_status);
+     row.tracking_codes=[...new Set((Array.isArray(track.tracking_info)?track.tracking_info:[]).map(x=>code(x.logistics_status)).filter(Boolean))];
+    }
+    if(results[0].status==='fulfilled'){
+     const financial=results[0].value,income=financial.order_income;
+     if(income&&typeof income==='object'){
+      row.finance_status='queried';
+      for(const key of ['buyer_total_amount','escrow_amount','escrow_amount_after_adjustment','seller_return_refund','refund_amount_to_buyer','seller_lost_compensation','commission_fee','service_fee','seller_transaction_fee','actual_shipping_fee','reverse_shipping_fee','final_return_to_seller_shipping_fee','order_adjustment_amount'])row.income[key]=amount(income[key]);
+      row.adjustments=(Array.isArray(income.order_adjustment)?income.order_adjustment:[]).map(x=>({amount:amount(x.amount),date:Number.isFinite(Number(x.date))?Number(x.date):null,currency:code(x.currency),reason:code(x.adjustment_reason)}));
+     }
+     const refs=financial.return_order_sn_list;
+     if(Array.isArray(refs)){
+      row.returns_status=refs.length?'queried':'no_references_returned';
+      const safeRefs=[...new Set(refs.filter(x=>typeof x==='string'&&/^[A-Za-z0-9]{1,64}$/.test(x)))];
+      if(safeRefs.length!==refs.length)row.returns_status='partial';
+      for(const return_sn of safeRefs){
+       try{
+        const detail=await shopGet('/api/v2/returns/get_return_detail',{return_sn},c);
+        if(detail.order_sn&&detail.order_sn!==order_sn){row.returns_status='partial';continue;}
+        row.returns.push({return_sn,query_status:'queried',status:code(detail.status),reason:code(detail.reason),reassessed_reason:code(detail.reassessed_request_reason),solution:Number.isInteger(detail.return_solution)?detail.return_solution:null,refund_amount:amount(detail.refund_amount),seller_compensation_status:code(detail.seller_compensation_status),reverse_logistics_status:code(detail.reverse_logistic_status)||code(detail.logistics_status)});
+       }catch{row.returns_status='partial';row.returns.push({return_sn,query_status:'unavailable'});}
+      }
+     }
+    }
+    evidence.push(row);
+   }));
+   return Response.json({processed:evidence.length,evidence});
+  }
   if(action==='finance'){
    const body=await req.json().catch(()=>({})),c=await activeShop(body.shop_id),offset=Number(body.offset||0);
    if(!Number.isInteger(offset)||offset<0||offset>10000)return Response.json({error:'Offset inválido'},{status:400});
