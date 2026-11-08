@@ -64,6 +64,18 @@ export default function ShopeePanel({token}){
   setBusy(true);setError('');
   try{
    if(which==='start'){const data=await call('start','POST');window.location.assign(data.url);return}
+   if(which==='review'){
+    const candidates=await call('review-candidates','GET',undefined,selectedShop,{start:rangeStart,end:rangeEnd});
+    const ids=candidates.orderSns;let done=0,ok=0,unavailable=0;
+    setProgress('Revisão: '+ids.length+' pedidos negativos ou zerados selecionados');
+    for(let i=0;i<ids.length;i+=10){
+     const batch=ids.slice(i,i+10),result=await call('finance','POST',{shop_id:selectedShop,dateStart:rangeStart,dateEnd:rangeEnd,orderSns:batch});
+     if(result.processed!==batch.length)throw Error('Quantidade de pedidos revisados divergente');
+     done+=result.processed;ok+=result.ok;unavailable+=result.unavailable;
+     setProgress('Revisão negativos e zerados: '+done+'/'+ids.length+' • '+ok+' com valor esperado • '+unavailable+' pendências');
+    }
+    await loadShop(selectedShop);return;
+   }
    if(which==='sync'){
     const start=range?.start||daysAgoUTC(7),end=range?.end||todayUTC();
     const windows=historyWindows(start,end),syncUntil=Math.floor(Date.now()/1000);
@@ -116,14 +128,14 @@ export default function ShopeePanel({token}){
     if(!complete)setError('Consulta limitada aos primeiros 10.000 pedidos.');
    }
    await load();
-  }catch(e){setError(e.message)}finally{setBusy(false);if(['sync','finance','releases'].includes(which))window.dispatchEvent(new Event('concilia-data-updated'))}
+  }catch(e){setError(e.message)}finally{setBusy(false);if(['sync','finance','releases','review'].includes(which))window.dispatchEvent(new Event('concilia-data-updated'))}
  }
  return <section className="card" style={{marginTop:20}}>
   <div className="sectiontitle"><div><h2>Shopee — Conciliação</h2><small>Integração em preparação para aprovação Go-Live</small></div><span className="tag">{status?.connected?'LOJA CONECTADA':status?.configured?'PRONTA PARA AUTORIZAR':'AGUARDANDO CREDENCIAIS'}</span></div>
   <div className="store-switch" style={{marginBottom:14}}><label htmlFor="shopee-shop">Loja Shopee</label><select id="shopee-shop" disabled={busy} value={selectedShop} onChange={e=>{setOrders([]);setTotal(0);setNextOffset(0);setProgress('');setError('');setReleaseSummary(null);setReceiptStats(null);setView('sales');setSelectedShop(e.target.value)}}><option value="">Selecione uma loja</option>{(status?.shops||[]).map(x=><option key={x.shop_id} value={String(x.shop_id)}>Loja {x.shop_id}</option>)}</select><small>{(status?.shops||[]).length} loja(s) conectada(s)</small></div><div className="actions" style={{justifyContent:'flex-start',marginBottom:16,flexWrap:'wrap'}}>
    <button disabled={busy||!status?.configured||!status?.migrationReady} onClick={()=>run('start')}>+ Adicionar loja Shopee</button>
    <button className="secondary" disabled={busy||!selectedShop} onClick={()=>run('sync')}>Importar 7 dias</button>
-   <button className="secondary" disabled={busy||!selectedShop} onClick={()=>run('finance')}>Conferir valores do período</button>
+   <button className="secondary" disabled={busy||!selectedShop} onClick={()=>run('finance')}>Conferir valores do período</button><button disabled={busy||!selectedShop||!status?.releasesReady} onClick={()=>run('review')}>Revisar negativos e zerados</button>
    <small>{selectedShop?'Loja selecionada: '+selectedShop:''}</small>
   </div>
   <div className="history-range"><strong>Importação retroativa — Shopee</strong><div className="history-inputs"><label>Data inicial<input type="date" value={rangeStart} max={todayUTC()} disabled={busy} onChange={e=>{setRangeStart(e.target.value);setReleaseSummary(null);setReceiptStats(null)}}/></label><label>Data final<input type="date" value={rangeEnd} max={todayUTC()} disabled={busy} onChange={e=>{setRangeEnd(e.target.value);setReleaseSummary(null);setReceiptStats(null)}}/></label><button disabled={busy||!selectedShop} onClick={()=>run('sync',{start:rangeStart,end:rangeEnd})}>Importar período selecionado</button><button className="secondary" disabled={busy||!selectedShop} onClick={()=>loadShop(selectedShop).catch(()=>{})}>Ver relatório do período</button><button disabled={busy||!selectedShop||!status?.releasesReady} onClick={()=>run('releases')}>Consultar liberações e valores</button><button className="secondary" disabled={busy||!selectedShop||!status?.releasesReady} onClick={()=>loadCredits().catch(e=>setError(e.message))}>Ver por data de recebimento</button><button className="secondary" disabled={busy||!selectedShop||!status?.releasesReady} onClick={calculateReceiptTiming}>Calcular prazo médio</button></div><small>Pesquisa por data de criação, dividida em janelas de até 7 dias (UTC). Histórico disponível depende dos limites da API Shopee. O botão Conferir valores consulta pedidos criados no período. Consultar liberações usa a data em que a Shopee creditou o dinheiro na carteira, que pode ser posterior à venda.</small></div>
