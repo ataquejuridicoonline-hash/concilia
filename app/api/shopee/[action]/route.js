@@ -36,13 +36,17 @@ export async function GET(req,{params}){
    if(!/^[0-9]+$/.test(shopId||'')||!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||from<1||to<from||to-from>15*86400||to>Math.floor(Date.now()/1000)+60||!Number.isInteger(page)||page<0||page>100000)return Response.json({error:'Loja, período ou página inválida'},{status:400});
    const c=await activeShop(shopId);
    try{
-    const r=await shopGet('/api/v2/payment/get_wallet_transaction_list',{create_time_from:from,create_time_to:to,page_no:page,page_size:100},c);
+    const response=await fetch(urlFor('/api/v2/payment/get_wallet_transaction_list',{create_time_from:from,create_time_to:to,page_no:page,page_size:100},{access:c.token,shop:c.shop_id}),{cache:'no-store'});
+    // Preserve provider 64-bit identifiers before JSON converts them to imprecise numbers.
+    const text=await response.text(),raw=JSON.parse(text.replace(/"(transaction_id|withdrawal_id|root_withdrawal_id)"\s*:\s*(\d+)(?=\s*[,}])/g,'"$1":"$2"'));
+    if(!response.ok||raw.error)throw Error('wallet_unavailable');
+    const r=raw.response||{};
     if(!Array.isArray(r.transaction_list)||typeof r.more!=='boolean')return Response.json({available:false,reason:'Formato do extrato não confirmado; dados anteriores preservados'});
     const code=v=>typeof v==='string'&&/^[A-Za-z0-9_.-]{1,100}$/.test(v)?v:null;
-    const id=v=>typeof v==='string'?code(v):Number.isSafeInteger(v)&&v>0?String(v):null;
+    const id=v=>typeof v==='string'&&!/^0+$/.test(v)?code(v):Number.isSafeInteger(v)&&v>0?String(v):null;
     const amount=v=>v===null||v===undefined||v===''||!Number.isFinite(Number(v))?null:round(v);
     const rows=r.transaction_list.map(x=>({transaction_id:id(x.transaction_id)||id(x.transaction_sn),order_sn:code(x.order_sn),withdrawal_id:id(x.withdrawal_id),root_withdrawal_id:id(x.root_withdrawal_id),transaction_type:typeof x.transaction_type==='number'?String(x.transaction_type):code(x.transaction_type),status:code(x.status),money_flow:code(x.money_flow),amount:amount(x.amount),current_balance:amount(x.current_balance),transaction_fee:amount(x.transaction_fee),create_time:Number.isSafeInteger(x.create_time)&&x.create_time>0?x.create_time:null}));
-    return Response.json({available:true,shop_id:c.shop_id,checked_at:new Date().toISOString(),transactions:rows,more:r.more,page,source:'shopee_get_wallet_transaction_list'});
+    return Response.json({available:true,shop_id:c.shop_id,checked_at:new Date().toISOString(),transactions:rows,more:r.more,page,source:'shopee_get_wallet_transaction_list',withdrawal_fields:Object.keys(r.transaction_list.find(x=>String(x.transaction_type).includes('WITHDRAWAL'))||{}).filter(x=>/id|withdraw/.test(x)&&/^[A-Za-z0-9_]{1,80}$/.test(x))});
    }catch{return Response.json({available:false,reason:'Extrato da carteira indisponível para esta integração. Importe o CSV oficial da carteira.'});}
   }
   if(action==='income-overview'){
