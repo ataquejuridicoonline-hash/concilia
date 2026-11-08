@@ -64,6 +64,21 @@ export async function GET(req,{params}){
    const orderMap=new Map(orders.map(o=>[o.order_sn,o]));
    return Response.json({credits:(data||[]).map(c=>({...orderMap.get(c.order_sn),...c})),total:count||0,nextOffset:offset+(data||[]).length});
   }
+  if(action==='review-candidates'){
+   const p=new URL(req.url).searchParams,shopId=p.get('shop_id'),start=p.get('dateStart'),end=p.get('dateEnd');
+   const valid=v=>/^\d{4}-\d{2}-\d{2}$/.test(v||'')&&Number.isFinite(Date.parse(v+'T00:00:00Z'))&&new Date(v+'T00:00:00Z').toISOString().slice(0,10)===v;
+   if(!/^[0-9]+$/.test(shopId||'')||!valid(start)||!valid(end)||start>end)return Response.json({error:'Loja ou datas inválidas'},{status:400});
+   if(!await shopConnection(shopId))return Response.json({error:'Loja não vinculada'},{status:404});
+   const ids=[];
+   for(let offset=0;;offset+=1000){
+    const page=await checked(db().from('shopee_releases').select('order_sn').eq('shop_id',shopId).lte('released_amount',0).order('order_sn',{ascending:true}).range(offset,offset+999));
+    ids.push(...page.map(x=>x.order_sn));if(page.length<1000)break;
+    if(ids.length>=100000)throw Error('Reduza o período para revisar');
+   }
+   const orders=[];
+   for(let i=0;i<ids.length;i+=100)orders.push(...await checked(db().from('shopee_orders').select('order_sn').eq('shop_id',shopId).neq('order_status','CANCELLED').gte('create_time',start+'T00:00:00Z').lte('create_time',new Date(Date.parse(end+'T00:00:00Z')+86400000-1).toISOString()).in('order_sn',ids.slice(i,i+100))));
+   return Response.json({orderSns:[...new Set(orders.map(x=>x.order_sn))].sort()});
+  }
   if(action==='orders'){
    const shopId=new URL(req.url).searchParams.get('shop_id');
    if(!/^[0-9]+$/.test(shopId||''))return Response.json({error:'Selecione uma loja Shopee'},{status:400});
@@ -131,7 +146,12 @@ export async function POST(req,{params}){
    const start=body.dateStart,end=body.dateEnd;
    if(typeof start!=='string'||typeof end!=='string'||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(start)||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(end)||start>end||Date.parse(end+'T00:00:00Z')>Date.now())return Response.json({error:'Selecione um período válido para conferência Shopee.'},{status:400});
    const periodEnd=new Date(Date.parse(end+'T00:00:00Z')+86400000-1).toISOString();
-   const orders=await checked(db().from('shopee_orders').select('order_sn').eq('shop_id',c.shop_id).gte('create_time',start+'T00:00:00.000Z').lte('create_time',periodEnd).order('create_time',{ascending:false}).order('order_sn',{ascending:false}).range(offset,offset+9));
+   const requested=body.orderSns;
+   if(requested!==undefined&&(!Array.isArray(requested)||requested.length<1||requested.length>10||requested.some(x=>typeof x!=='string'||! /^[A-Za-z0-9]{1,64}$/.test(x))||new Set(requested).size!==requested.length))return Response.json({error:'Pedidos inválidos para revisão'},{status:400});
+   let query=db().from('shopee_orders').select('order_sn').eq('shop_id',c.shop_id).gte('create_time',start+'T00:00:00.000Z').lte('create_time',periodEnd);
+   if(requested)query=query.in('order_sn',requested);
+   const orders=await checked(query.order('create_time',{ascending:false}).order('order_sn',{ascending:false}).range(requested?0:offset,requested?9:offset+9));
+   if(requested&&orders.length!==requested.length)return Response.json({error:'Pedido não pertence à loja ou período selecionado'},{status:400});
    let ok=0,unavailable=0;
    for(let batch=0;batch<orders.length;batch+=5){
     await Promise.all(orders.slice(batch,batch+5).map(async o=>{
