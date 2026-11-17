@@ -1,4 +1,4 @@
-import {admin,validConnection,meli} from '../../../../lib/server.js';
+import {admin,validConnection,meli,checked,db} from '../../../../lib/server.js';
 
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
@@ -81,6 +81,17 @@ export async function GET(req){
      error:'Não foi possível consultar reclamações por pedido ou por recurso na API.',
      code:'CLAIMS_LOOKUP_UNAVAILABLE',search_errors:failures,order_found:!!order,order_lookup_error:orderLookupError
    },{status:502});
+   // Diagnóstico auxiliar dos pedidos previamente sincronizados nesta mesma conta.
+   // Não consulta nem expõe tokens. Uma venda ausente pode indicar conta errada ou falta de permissão.
+   let orderInConcilia=null;
+   try {
+     const rows=await checked(db().from('meli_orders').select('order_id,seller_id').eq('order_id',searchedOrder).limit(20));
+     orderInConcilia={
+       found:rows.length>0,
+       connected_sellers:[...new Set(rows.map(x=>String(x.seller_id)))],
+       matches_selected_account:rows.some(x=>String(x.seller_id)===String(sellerId))
+     };
+   } catch { orderInConcilia={available:false}; }
    const unique=new Map();
    for(const group of successes)for(const entry of group.data)if(entry?.id&&!unique.has(String(entry.id)))unique.set(String(entry.id),entry);
    const inspected=[],accountMismatch=[];
@@ -113,7 +124,7 @@ export async function GET(req){
      seller_id:sellerId,order_id:searchedOrder,
      order:order?{id:String(order.id),status:order.status||null,items:(order.order_items||[]).slice(0,20).map(x=>({title:String(x.item?.title||'').slice(0,180),quantity:x.quantity||null}))}:null,
      claims:inspected,
-     diagnostics:{order_found:!!order,order_lookup_error:orderLookupError,searches:successes.map(x=>({source:x.kind,count:x.data.length,paging:x.paging})),search_errors:failures,unverified_or_other_seller:accountMismatch.length,raw_matched_claims:items.length,complete:failures.length===0&&successes.every(x=>x.data.length<100)},
+     diagnostics:{order_found:!!order,order_lookup_error:orderLookupError,order_in_concilia:orderInConcilia,searches:successes.map(x=>({source:x.kind,count:x.data.length,paging:x.paging})),search_errors:failures,unverified_or_other_seller:accountMismatch.length,raw_matched_claims:items.length,complete:failures.length===0&&successes.every(x=>x.data.length<100)},
      source:'mercadolivre_live',checked_at:new Date().toISOString(),
      notice:'Reputação é um indicador separado: a API de reclamações pode não refletir todos os problemas de reputação. Confirme a conta vendedora e utilize o painel oficial para impacto e exclusão.'
    },{headers:{'Cache-Control':'no-store'}});
