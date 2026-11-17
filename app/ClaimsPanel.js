@@ -136,12 +136,14 @@ export default function ClaimsPanel({token,stores=[]}){
    <small style={{color:'#64748b'}}>Busca diretamente na API por order_id, incluindo reclamações abertas e encerradas, sem carregar o histórico completo.</small>
    {orderError&&<p className="error" role="alert" style={{marginTop:10}}>{orderError}</p>}
    {orderResult&&<div style={{marginTop:14}}>
-    <strong>Pedido #{orderResult.order_id}</strong> • {orderResult.claims?.length||0} reclamação(ões) encontrada(s) • {orderResult.order?.status||'status não disponível'}
+    <strong>Pedido #{orderResult.order_id}</strong> • {orderResult.claims?.length||0} reclamação(ões) encontrada(s) • {orderResult.order?.status||'pedido indisponível na consulta de pedidos'}
     {orderResult.order?.items?.length>0&&<p style={{margin:'7px 0',color:'#475569'}}>{orderResult.order.items.map(x=>x.title).join(' / ')}</p>}
+    {orderResult.diagnostics&&<p className="notice" style={{margin:'8px 0'}}>API: {orderResult.diagnostics.raw_matched_claims} reclamação(ões) localizadas nas buscas; {orderResult.diagnostics.unverified_or_other_seller} não confirmadas nesta conta. {orderResult.diagnostics.search_errors?.length?'Atenção: busca parcial; verifique os detalhes técnicos abaixo.':''}</p>}
     <div className="scroll"><table><thead><tr><th>Reclamação</th><th>Status</th><th>Responsável</th><th>Última atualização</th><th>Análise</th></tr></thead><tbody>
      {(orderResult.claims||[]).map(c=><tr key={c.id}><td>{String(c.id)}</td><td>{c.status||'—'}</td><td>{GROUPS.find(g=>g.id===c.responsibility)?.title||(c.responsibility==='closed'?'Encerrada':'A verificar')}</td><td>{formatDate(c.last_updated)}</td><td><button type="button" className="secondary" disabled={busy} onClick={()=>inspect({...c,resource_id:orderResult.order_id})}>Analisar no ChatGPT</button></td></tr>)}
-     {!orderResult.claims?.length&&<tr><td colSpan="5">Pedido localizado, sem reclamações retornadas na API.</td></tr>}
+     {!orderResult.claims?.length&&<tr><td colSpan="5">Nenhuma reclamação confirmada nesta conta pela API. Isso não significa que o pedido não afete a reputação. Confira a conta selecionada e o painel oficial de problemas em vendas.</td></tr>}
     </tbody></table></div>
+    {orderResult.diagnostics?.search_errors?.length>0&&<details style={{marginTop:10}}><summary>Detalhes de consulta incompleta</summary><pre style={{whiteSpace:'pre-wrap',fontSize:12}}>{JSON.stringify(orderResult.diagnostics.search_errors,null,2)}</pre></details>}
    </div>}
   </form>
   {loadingInfo&&<p role="status" className="notice">{loadingInfo} • {list?.scanned||0} carregadas até agora.</p>}
