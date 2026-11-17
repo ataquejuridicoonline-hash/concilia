@@ -120,7 +120,11 @@ export async function GET(req){
   }
   const status=p.get('status')||'opened',limit=Number(p.get('limit')||30),offset=Number(p.get('offset')||0);
   if(!['opened','closed'].includes(status)||!Number.isInteger(limit)||limit<1||limit>100||!Number.isInteger(offset)||offset<0||offset+limit>=10000)return Response.json({error:'Filtros ou paginação inválidos'},{status:400});
-  const qs=new URLSearchParams({'players.user_id':sellerId,'players.role':'respondent',status,limit:String(limit),offset:String(offset),sort:'last_updated:desc'});
+  // Consulta geral restrita aos 60 dias anteriores, usando a data de criação da reclamação.
+  // Busca específica por order_id (acima) continua independente do período.
+  const endDate=new Date(),startDate=new Date(endDate.getTime()-60*86400000);
+  const dateRange='date_created:after:'+startDate.toISOString()+',before:'+endDate.toISOString();
+  const qs=new URLSearchParams({'players.user_id':sellerId,'players.role':'respondent',status,limit:String(limit),offset:String(offset),sort:'last_updated:desc',range:dateRange});
   const found=await claimGet('/post-purchase/v1/claims/search?'+qs.toString(),c.accessToken);
   if(!Array.isArray(found.data))throw Error('Resposta inesperada do Mercado Livre');
   if(p.get('filter')==='responsibility'){
@@ -145,7 +149,7 @@ export async function GET(req){
    const counts={seller:0,buyer:0,meli:0,unknown:0};
    for(const x of inspected)counts[x.responsibility]++;
    return Response.json({seller_id:sellerId,filter:'responsibility',status,
-      claims:inspected,counts,scanned:inspected.length,paging:found.paging||{},
+      claims:inspected,counts,scanned:inspected.length,paging:found.paging||{},period:{days:60,from:startDate.toISOString(),to:endDate.toISOString(),field:'date_created'},
       source:'mercadolivre_live',checked_at:new Date().toISOString(),
       notice:'Responsável conforme /claims/{id}/detail. Contadores apenas das reclamações desta página; não equivalem necessariamente aos cartões do site Mercado Livre. Casos sem detalhe permanecem em A verificar.'},
       {headers:{'Cache-Control':'no-store'}});
@@ -174,9 +178,9 @@ export async function GET(req){
      }catch(e){return {...summary,response_state:'nao_verificado',reason:'Histórico indisponível'};}
     })));
    }
-   return Response.json({seller_id:sellerId,status,filter:'unanswered',claims:inspected.filter(x=>['resposta_pendente','sem_mensagem_do_vendedor'].includes(x.response_state)),not_verified:inspected.filter(x=>x.response_state==='nao_verificado'),scanned:inspected.length,paging:found.paging||{},checked_at:new Date().toISOString(),source:'mercadolivre_live',notice:'Filtro por histórico de mensagens da página consultada. Ações comerciais podem estar pendentes mesmo sem nova mensagem; a ausência de ação de resposta exige conferir o caso no ML.'},{headers:{'Cache-Control':'no-store'}});
+   return Response.json({seller_id:sellerId,status,filter:'unanswered',period:{days:60,from:startDate.toISOString(),to:endDate.toISOString(),field:'date_created'},claims:inspected.filter(x=>['resposta_pendente','sem_mensagem_do_vendedor'].includes(x.response_state)),not_verified:inspected.filter(x=>x.response_state==='nao_verificado'),scanned:inspected.length,paging:found.paging||{},checked_at:new Date().toISOString(),source:'mercadolivre_live',notice:'Filtro por histórico de mensagens da página consultada. Ações comerciais podem estar pendentes mesmo sem nova mensagem; a ausência de ação de resposta exige conferir o caso no ML.'},{headers:{'Cache-Control':'no-store'}});
   }
-  return Response.json({seller_id:sellerId,status,paging:found.paging||{},claims:found.data.map(x=>({id:x.id,resource:x.resource,resource_id:x.resource_id,reason_id:x.reason_id,type:x.type,stage:x.stage,status:x.status,date_created:x.date_created,last_updated:x.last_updated,fulfilled:x.fulfilled,available_actions:(x.players||[]).find(t=>t.role==='respondent'&&String(t.user_id)===sellerId)?.available_actions||[]})),source:'mercadolivre_live',checked_at:new Date().toISOString(),notice:'A listagem não prova culpa logística nem exclusão da reputação. Consulte detalhes e evidências.'},{headers:{'Cache-Control':'no-store'}});
+  return Response.json({seller_id:sellerId,status,paging:found.paging||{},period:{days:60,from:startDate.toISOString(),to:endDate.toISOString(),field:'date_created'},claims:found.data.map(x=>({id:x.id,resource:x.resource,resource_id:x.resource_id,reason_id:x.reason_id,type:x.type,stage:x.stage,status:x.status,date_created:x.date_created,last_updated:x.last_updated,fulfilled:x.fulfilled,available_actions:(x.players||[]).find(t=>t.role==='respondent'&&String(t.user_id)===sellerId)?.available_actions||[]})),source:'mercadolivre_live',checked_at:new Date().toISOString(),notice:'A listagem não prova culpa logística nem exclusão da reputação. Consulte detalhes e evidências.'},{headers:{'Cache-Control':'no-store'}});
  }catch(e){return safeError(e)}
 }
 export async function POST(req){
