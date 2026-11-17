@@ -1,6 +1,7 @@
 'use client';
-import {useState} from 'react';
+import {useRef,useState} from 'react';
 
+const CHAT_URL='https://chatgpt.com/g/g-p-6afc6eb9958881918cc959dd2845ba6b-reclamacoes-mercado-livre/c/6afc6a4a-d34c-83e8-90eb-a5953282aba1';
 const GROUPS=[
  {id:'seller',title:'Pendentes do vendedor',subtitle:'Sua ação é necessária',color:'#d84b2c'},
  {id:'buyer',title:'Pendentes do comprador',subtitle:'Aguardando o cliente',color:'#396caa'},
@@ -8,9 +9,36 @@ const GROUPS=[
  {id:'unknown',title:'A verificar',subtitle:'Responsável não confirmado pela API',color:'#777'}
 ];
 const formatDate=v=>{if(!v)return '—';const d=new Date(v);return Number.isNaN(d.valueOf())?'—':d.toLocaleString('pt-BR')};
+const textOf=v=>typeof v==='string'?v:typeof v?.text==='string'?v.text:typeof v?.message==='string'?v.message:typeof v?.message?.text==='string'?v.message.text:'';
+const dataList=v=>Array.isArray(v)?v:Array.isArray(v?.messages)?v.messages:Array.isArray(v?.data)?v.data:[];
+function casePrompt(d,caseRow,sellerId){
+ const c=d?.claim||{},desc=d?.claim_detail||{},reason=d?.reason||{},messages=dataList(d?.messages);
+ const chat=messages.slice(-18).map(m=>({
+  de:m.sender_role||m.from?.role||m.sender?.role||'não identificado',
+  data:m.message_date||m.date_created||m.date||null,
+  texto:textOf(m).slice(0,1000),
+  anexos:Array.isArray(m.attachments)?m.attachments.length:0
+ }));
+ const payload={
+  conta_vendedora:sellerId,claim_id:c.id||caseRow?.id,order_id:d?.order?.id||caseRow?.resource_id,
+  status:c.status,stage:c.stage||caseRow?.stage,
+  responsavel_da_proxima_acao:desc.action_responsible||caseRow?.action_responsible||'não confirmado',
+  prazo:desc.due_date||caseRow?.due_date||null,
+  motivo:reason.description||reason.name||c.reason_id||caseRow?.reason_id||'não informado',
+  classificacao_preliminar:d?.analysis?.classification||'não verificada',
+  item:d?.order?.items||[],modalidade_envio:d?.order?.shipping||null,
+  historico_mensagens:chat,
+  mensagens_disponiveis:d?.allowed_message_recipients||[],
+  consulta_em:d?.checked_at,
+  comprovantes_de_embalagem:'Não enviados a esta conversa; solicitar ao vendedor quando necessários'
+ };
+ return 'JARVIS, ANALISAR RECLAMAÇÃO REAL DO MERCADO LIVRE. Seguem dados consultados via Concilia. Examine o motivo, histórico e prazo, identifique provas necessárias, possíveis argumentos para revisão da reputação, riscos e prepare resposta ao comprador e defesa ao ML. Não invente fotos, fatos ou exclusão da reputação. Não envie nada ao ML sem minha autorização individual. Se dados estiverem ausentes, indique. Dados JSON:\n'+JSON.stringify(payload,null,2);
+}
 export default function ClaimsPanel({token,stores=[]}){
  const [seller,setSeller]=useState(''),[view,setView]=useState('seller'),[status,setStatus]=useState('opened');
- const [list,setList]=useState(null),[detail,setDetail]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+ const [list,setList]=useState(null),[detail,setDetail]=useState(null),[caseText,setCaseText]=useState(''),[caseInfo,setCaseInfo]=useState('');
+ const [error,setError]=useState(''),[busy,setBusy]=useState(false);
+ const detailRef=useRef(null);
  const selected=seller||String(stores[0]?.seller_id||'');
  async function request(params){
   const response=await fetch('/api/mercadolivre/claims?'+new URLSearchParams({seller_id:selected,...params}),{headers:{Authorization:'Bearer '+token},cache:'no-store'});
@@ -19,30 +47,48 @@ export default function ClaimsPanel({token,stores=[]}){
   return data;
  }
  async function load(){
-  setBusy(true);setError('');setDetail(null);
+  setBusy(true);setError('');setDetail(null);setCaseText('');setCaseInfo('');
   try{setList(await request({status,limit:'100',filter:'responsibility'}))}
   catch(e){setError(e.message)}
   finally{setBusy(false)}
  }
- async function inspect(id){
-  setBusy(true);setError('');
-  try{setDetail(await request({claim_id:String(id)}))}
-  catch(e){setError(e.message)}
-  finally{setBusy(false)}
+ async function inspect(row){
+  if(busy)return;
+  // Abrir imediatamente a conversa na ação do clique, evitando bloqueio de pop-ups.
+  const tab=window.open(CHAT_URL,'_blank','noopener,noreferrer');
+  setBusy(true);setError('');setDetail(null);setCaseText('');setCaseInfo('Buscando reclamação '+row.id+' na API...');
+  try{
+   const data=await request({claim_id:String(row.id)});
+   const prompt=casePrompt(data,row,selected);
+   setCaseText(prompt);setDetail(data);
+   let copied=false;
+   try{await navigator.clipboard.writeText(prompt);copied=true}catch{}
+   setCaseInfo(copied
+    ?'Dados da reclamação copiados. A conversa foi aberta: cole (Ctrl+V ou Cmd+V) e envie para eu analisar.'
+    :'A conversa foi aberta, mas o navegador não permitiu copiar automaticamente. Clique em “Copiar análise” abaixo e cole na conversa.');
+   if(!tab) setCaseInfo('A abertura da conversa foi bloqueada. Use o botão “Abrir esta conversa”, copie os dados e cole para análise.');
+   requestAnimationFrame(()=>detailRef.current?.scrollIntoView({behavior:'smooth',block:'start'}));
+  }catch(e){
+   setError('Não foi possível carregar a reclamação '+row.id+': '+e.message);
+   setCaseInfo('Não foram enviados dados ao ChatGPT. Verifique o erro abaixo.');
+  }finally{setBusy(false)}
+ }
+ async function copy(){
+  try{await navigator.clipboard.writeText(caseText);setCaseInfo('Dados copiados. Agora cole e envie na conversa do ChatGPT.')}
+  catch{setCaseInfo('Selecione o conteúdo no campo abaixo e copie manualmente.')}
  }
  const rows=(list?.claims||[]).filter(x=>view==='all'||x.responsibility===view);
  const count=id=>list?.counts?.[id]??'—';
- const actions=(detail?.allowed_message_recipients||[]).join(', ')||'nenhum envio autorizado agora';
  return <section className="card" style={{marginTop:16}}>
   <h2>Central de reclamações • Mercado Livre</h2>
-  <p>Divisão pelo responsável da próxima ação, consultada diretamente no Mercado Livre. Apenas leitura, sem envios automáticos.</p>
+  <p>Clique em <strong>Analisar no ChatGPT</strong> para consultar a reclamação e abrir esta conversa. As respostas nunca são enviadas ao Mercado Livre sem sua aprovação.</p>
   <div className="actions" style={{display:'flex',gap:12,flexWrap:'wrap',alignItems:'end',margin:'16px 0'}}>
-    <label>Conta Mercado Livre <select value={selected} onChange={e=>{setSeller(e.target.value);setList(null);setDetail(null)}}>{stores.map(x=><option key={x.seller_id} value={String(x.seller_id)}>Vendedor {x.seller_id}</option>)}</select></label>
-    <label>Situação <select value={status} onChange={e=>{setStatus(e.target.value);setList(null);setDetail(null)}}><option value="opened">Abertas</option><option value="closed">Encerradas</option></select></label>
-    <button type="button" disabled={busy||!selected||!token} onClick={load}>{busy?'Consultando os responsáveis...':'Atualizar reclamações'}</button>
+    <label>Conta Mercado Livre <select value={selected} onChange={e=>{setSeller(e.target.value);setList(null);setDetail(null);setCaseText('')}}>{stores.map(x=><option key={x.seller_id} value={String(x.seller_id)}>Vendedor {x.seller_id}</option>)}</select></label>
+    <label>Situação <select value={status} onChange={e=>{setStatus(e.target.value);setList(null);setDetail(null);setCaseText('')}}><option value="opened">Abertas</option><option value="closed">Encerradas</option></select></label>
+    <button type="button" disabled={busy||!selected||!token} onClick={load}>{busy?'Consultando...':'Atualizar reclamações'}</button>
   </div>
   <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:12,margin:'16px 0'}}>
-   {GROUPS.map(g=><button key={g.id} type="button" onClick={()=>{setView(g.id);setDetail(null)}} aria-pressed={view===g.id} style={{textAlign:'left',border:'1px solid '+(view===g.id?g.color:'#dbe1e9'),borderLeft:'4px solid '+g.color,background:view===g.id?'#f7f9fc':'#fff',borderRadius:10,padding:16,color:'#1e293b',minHeight:118,boxShadow:view===g.id?'0 3px 9px #00000012':'none'}}>
+   {GROUPS.map(g=><button key={g.id} type="button" onClick={()=>{setView(g.id);setDetail(null);setCaseText('')}} aria-pressed={view===g.id} style={{textAlign:'left',border:'1px solid '+(view===g.id?g.color:'#dbe1e9'),borderLeft:'4px solid '+g.color,background:view===g.id?'#f7f9fc':'#fff',borderRadius:10,padding:16,color:'#1e293b',minHeight:118,boxShadow:view===g.id?'0 3px 9px #00000012':'none'}}>
       <span style={{display:'block',fontWeight:700,fontSize:14}}>{g.title}</span>
       <strong style={{fontSize:30,display:'block',margin:'7px 0 1px',color:g.color}}>{count(g.id)}</strong>
       <small style={{fontSize:12,color:'#64748b'}}>{g.subtitle}</small>
@@ -52,25 +98,32 @@ export default function ClaimsPanel({token,stores=[]}){
     <button type="button" className={view==='all'?'':'secondary'} onClick={()=>setView('all')}>Todas as abertas ({list?.scanned??'—'})</button>
     <small style={{color:'#64748b'}}>Contadores desta consulta; podem diferir dos totais do painel oficial.</small>
   </div>
+  {caseInfo&&<p role="status" className="notice" style={{fontWeight:600}}>{caseInfo}</p>}
   {error&&<p role="alert" className="error">{error}</p>}
-  {list&&<><p className="notice">Consulta: {formatDate(list.checked_at)} • {list.scanned} reclamações examinadas • fonte: {list.source}. A separação usa o campo action_responsible de cada reclamação.</p>
+  {list&&<><p className="notice">Consulta: {formatDate(list.checked_at)} • {list.scanned} reclamações examinadas • fonte: {list.source}.</p>
    <div className="scroll"><table><thead><tr><th>Reclamação</th><th>Pedido / Recurso</th><th>Etapa</th><th>Responsável</th><th>Prazo</th><th>Análise</th></tr></thead>
    <tbody>{rows.map(c=><tr key={c.id}>
     <td>{String(c.id)}</td><td>{String(c.resource_id||'—')}</td><td>{c.stage||'—'}</td>
     <td>{GROUPS.find(g=>g.id===c.responsibility)?.title||'A verificar'}</td>
     <td>{formatDate(c.due_date)}</td>
-    <td><button className="secondary" type="button" disabled={busy} onClick={()=>inspect(c.id)}>Analisar</button></td>
+    <td><button className="secondary" type="button" disabled={busy} onClick={()=>inspect(c)}>Analisar no ChatGPT</button></td>
    </tr>)}
-   {!rows.length&&<tr><td colSpan="6">Nenhuma reclamação classificada nesta categoria na página consultada. Confira também os casos em “A verificar”.</td></tr>}</tbody></table></div>
-  <p className="notice">A responsabilidade foi identificada no detalhe da reclamação. A contagem cobre somente os resultados consultados; para casos adicionais ou impossibilidade de consultar o responsável, confira a central oficial do Mercado Livre.</p>
+   {!rows.length&&<tr><td colSpan="6">Nenhuma reclamação classificada nesta categoria na página consultada.</td></tr>}</tbody></table></div>
+  <p className="notice">Os botões preparam o contexto de cada reclamação para esta conversa. Não é possível enviar mensagens automaticamente a uma conversa existente do ChatGPT apenas por um link: é necessário colar e enviar o conteúdo.</p>
   </>}
-  {detail&&<div className="card" style={{marginTop:16,padding:16}}>
-   <h3>Reclamação {detail.claim?.id}</h3>
+  <div ref={detailRef}>
+  {detail&&<div className="card" style={{marginTop:16,padding:16,outline:'2px solid #fd7041'}}>
+   <h3>Reclamação {detail.claim?.id} — pronta para análise</h3>
    <p>Classificação preliminar: <strong>{detail.analysis?.classification||'indeterminada'}</strong></p>
-   <p>{detail.analysis?.note}</p>
-   <p>Ações de mensagens disponíveis: {actions}</p>
-   <p>Histórico de mensagens: {detail.messages?'consultado':'indisponível'}</p>
-   <pre style={{whiteSpace:'pre-wrap',wordBreak:'break-word',maxHeight:300,overflow:'auto'}}>{JSON.stringify({claim:detail.claim,messages:detail.messages,reason:detail.reason,actions_history:detail.actions_history},null,2)}</pre>
+   <p>Mensagens para: {(detail.allowed_message_recipients||[]).join(', ')||'nenhuma ação de envio disponível'}</p>
+   <div style={{display:'flex',gap:9,flexWrap:'wrap',margin:'12px 0'}}>
+     <button type="button" onClick={copy}>Copiar dados da reclamação</button>
+     <a className="secondary" href={CHAT_URL} target="_blank" rel="noopener noreferrer" style={{display:'inline-flex',alignItems:'center',border:'1px solid #d6dbe4',borderRadius:7,padding:'10px 15px',textDecoration:'none'}}>Abrir esta conversa</a>
+   </div>
+   <label style={{display:'block'}}>Conteúdo preparado para colar no ChatGPT
+     <textarea readOnly value={caseText} rows={9} style={{width:'100%',boxSizing:'border-box',marginTop:7,fontSize:12}} onFocus={e=>e.target.select()}/>
+   </label>
   </div>}
+  </div>
  </section>;
 }
