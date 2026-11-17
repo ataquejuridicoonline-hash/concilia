@@ -57,33 +57,66 @@ export async function GET(req){
   const searchedOrder=p.get('order_id');
   if(searchedOrder!==null){
    if(!digits(searchedOrder))return Response.json({error:'Informe um número de pedido válido (somente dígitos)'},{status:400});
-   // Confirmar que a venda pertence ao vendedor conectado antes de retornar reclamações.
-   const order=await meli('/orders/'+encodeURIComponent(searchedOrder),c.accessToken).catch(()=>null);
-   if(!order||String(order.seller?.id)!==String(sellerId)){
-    return Response.json({error:'Pedido não encontrado nesta conta vendedora ou sem permissão de acesso'},{status:404});
+   // Checa a associação sem reduzir as reclamações a um único tipo de recurso.
+   let order=null,orderLookupError=null;
+   try{order=await meli('/orders/'+encodeURIComponent(searchedOrder),c.accessToken)}
+   catch(e){orderLookupError=e.message||'Consulta do pedido indisponível';}
+   if(order&&String(order.seller?.id)!==String(sellerId)){
+     return Response.json({error:'Pedido vinculado a outra conta vendedora. Confira a conta selecionada no Concilia.',code:'ORDER_SELLER_MISMATCH'}, {status:409});
    }
-   const qs=new URLSearchParams({order_id:searchedOrder,limit:'100',offset:'0'});
-   const found=await claimGet('/post-purchase/v1/claims/search?'+qs.toString(),c.accessToken);
-   if(!Array.isArray(found.data))throw Error('Resposta inesperada da busca por pedido');
-   const items=found.data.filter(x=>(x.players||[]).some(t=>t.role==='respondent'&&String(t.user_id)===String(sellerId)));
-   const inspected=[];
+   // order_id é o filtro oficial que agrega recursos relacionados ao pedido.
+   // A segunda busca cobre casos vinculados diretamente ao recurso order.
+   const searches=[
+     {kind:'order_id',query:new URLSearchParams({order_id:searchedOrder,limit:'100',offset:'0'})},
+     {kind:'resource',query:new URLSearchParams({resource:'order',resource_id:searchedOrder,limit:'100',offset:'0'})}
+   ];
+   const results=await Promise.allSettled(searches.map(async ({kind,query})=>{
+     const response=await claimGet('/post-purchase/v1/claims/search?'+query,c.accessToken);
+     if(!Array.isArray(response.data))throw Error('Resposta inválida da busca '+kind);
+     return {kind,data:response.data,paging:response.paging||{}};
+   }));
+   const successes=results.flatMap((r,i)=>r.status==='fulfilled'?[r.value]:[]);
+   const failures=results.flatMap((r,i)=>r.status==='rejected'?[{source:searches[i].kind,message:String(r.reason?.message||'Falha de consulta').slice(0,180)}]:[]);
+   if(!successes.length) return Response.json({
+     error:'Não foi possível consultar reclamações por pedido ou por recurso na API.',
+     code:'CLAIMS_LOOKUP_UNAVAILABLE',search_errors:failures,order_found:!!order,order_lookup_error:orderLookupError
+   },{status:502});
+   const unique=new Map();
+   for(const group of successes)for(const entry of group.data)if(entry?.id&&!unique.has(String(entry.id)))unique.set(String(entry.id),entry);
+   const inspected=[],accountMismatch=[];
+   const items=[...unique.values()];
    for(let i=0;i<items.length;i+=6){
-    inspected.push(...await Promise.all(items.slice(i,i+6).map(async x=>{
-     const base={id:x.id,resource_id:x.resource_id,stage:x.stage,status:x.status,
-       reason_id:x.reason_id,last_updated:x.last_updated,date_created:x.date_created};
-     try{
-      const detail=await claimGet('/post-purchase/v1/claims/'+encodeURIComponent(String(x.id))+'/detail',c.accessToken);
-      const role=detail?.action_responsible;
-      const group=['respondent','seller'].includes(role)?'seller':['complainant','buyer'].includes(role)?'buyer':['mediator','mercadolibre','mercado_libre'].includes(role)?'meli':'unknown';
-      return {...base,responsibility:x.status==='closed'?'closed':group,action_responsible:role||null,due_date:detail?.due_date||null};
-     }catch{return {...base,responsibility:x.status==='closed'?'closed':'unknown',action_responsible:null,due_date:null};}
-    })));
+     await Promise.all(items.slice(i,i+6).map(async x=>{
+       const claimId=String(x.id);
+       let full=x;
+       // O search pode omitir players. Buscar reclamação completa em vez de descartá-la.
+       try{full=await claimGet('/post-purchase/v1/claims/'+encodeURIComponent(claimId),c.accessToken)}
+       catch{ if(!Array.isArray(x.players)||!x.players.length)return; }
+       const players=Array.isArray(full.players)?full.players:[];
+       const confirmed=players.some(t=>t.role==='respondent'&&String(t.user_id)===String(sellerId));
+       if(!confirmed){accountMismatch.push(claimId);return;}
+       const base={id:full.id,resource_id:full.resource_id||x.resource_id||searchedOrder,
+         resource:full.resource||x.resource||null,stage:full.stage||x.stage,
+         status:full.status||x.status,reason_id:full.reason_id||x.reason_id,
+         last_updated:full.last_updated||x.last_updated,date_created:full.date_created||x.date_created};
+       let role=null,due=null;
+       try{
+         const detail=await claimGet('/post-purchase/v1/claims/'+encodeURIComponent(claimId)+'/detail',c.accessToken);
+         role=detail?.action_responsible||null;due=detail?.due_date||null;
+       }catch{}
+       const group=['respondent','seller'].includes(role)?'seller':['complainant','buyer'].includes(role)?'buyer':['mediator','mercadolibre','mercado_libre'].includes(role)?'meli':'unknown';
+       inspected.push({...base,responsibility:base.status==='closed'?'closed':group,action_responsible:role,due_date:due});
+     }));
    }
-   return Response.json({seller_id:sellerId,order_id:searchedOrder,
-     order:{id:String(order.id),status:order.status||null,items:(order.order_items||[]).slice(0,20).map(x=>({title:x.item?.title||'',quantity:x.quantity||null}))},
-     claims:inspected,paging:found.paging||{},source:'mercadolivre_live',checked_at:new Date().toISOString(),
-     notice:'Busca pelo order_id na API oficial, inclui reclamações abertas e encerradas. A ausência de reclamação não confirma ausência de devoluções ou mensagens fora do fluxo de claims.'},
-     {headers:{'Cache-Control':'no-store'}});
+   inspected.sort((a,b)=>Date.parse(b.last_updated||0)-Date.parse(a.last_updated||0));
+   return Response.json({
+     seller_id:sellerId,order_id:searchedOrder,
+     order:order?{id:String(order.id),status:order.status||null,items:(order.order_items||[]).slice(0,20).map(x=>({title:String(x.item?.title||'').slice(0,180),quantity:x.quantity||null}))}:null,
+     claims:inspected,
+     diagnostics:{order_found:!!order,order_lookup_error:orderLookupError,searches:successes.map(x=>({source:x.kind,count:x.data.length,paging:x.paging})),search_errors:failures,unverified_or_other_seller:accountMismatch.length,raw_matched_claims:items.length,complete:failures.length===0&&successes.every(x=>x.data.length<100)},
+     source:'mercadolivre_live',checked_at:new Date().toISOString(),
+     notice:'Reputação é um indicador separado: a API de reclamações pode não refletir todos os problemas de reputação. Confirme a conta vendedora e utilize o painel oficial para impacto e exclusão.'
+   },{headers:{'Cache-Control':'no-store'}});
   }
   const status=p.get('status')||'opened',limit=Number(p.get('limit')||30),offset=Number(p.get('offset')||0);
   if(!['opened','closed'].includes(status)||!Number.isInteger(limit)||limit<1||limit>100||!Number.isInteger(offset)||offset<0||offset+limit>=10000)return Response.json({error:'Filtros ou paginação inválidos'},{status:400});
