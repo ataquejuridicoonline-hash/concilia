@@ -53,7 +53,7 @@ export async function GET(req){
       try{
        const detail=await claimGet('/post-purchase/v1/claims/'+encodeURIComponent(String(x.id))+'/detail',c.accessToken);
        const responsible=detail?.action_responsible;
-       const group=responsible==='respondent'?'seller':responsible==='complainant'?'buyer':responsible==='mediator'?'meli':'unknown';
+       const group=['respondent','seller'].includes(responsible)?'seller':['complainant','buyer'].includes(responsible)?'buyer':['mediator','mercadolibre','mercado_libre'].includes(responsible)?'meli':'unknown';
        return {...base,responsibility:group,action_responsible:responsible||null,
         due_date:detail?.due_date||null,detail_title:detail?.title||null,
         problem:detail?.problem||null,description:detail?.description||null};
