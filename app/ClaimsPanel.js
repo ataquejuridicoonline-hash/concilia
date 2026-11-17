@@ -2,7 +2,7 @@
 import {useState} from 'react';
 
 export default function ClaimsPanel({token,stores=[]}){
- const [seller,setSeller]=useState(''),[status,setStatus]=useState('opened'),[list,setList]=useState(null),[detail,setDetail]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+ const [filter,setFilter]=useState('all'),[seller,setSeller]=useState(''),[status,setStatus]=useState('opened'),[list,setList]=useState(null),[detail,setDetail]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
  const selected=seller||String(stores[0]?.seller_id||'');
  async function request(params){
   const response=await fetch('/api/mercadolivre/claims?'+new URLSearchParams({seller_id:selected,...params}),{headers:{Authorization:'Bearer '+token},cache:'no-store'});
@@ -10,22 +10,22 @@ export default function ClaimsPanel({token,stores=[]}){
   if(!response.ok)throw Error(result.error||'Falha de autenticação ou consulta');
   return result;
  }
- async function load(){setBusy(true);setError('');setDetail(null);try{setList(await request({status,limit:'50'}))}catch(e){setError(e.message)}finally{setBusy(false)}}
+ async function load(){setBusy(true);setError('');setDetail(null);try{setList(await request({status:filter==='unanswered'?'opened':status,limit:'100',...(filter==='unanswered'?{filter:'unanswered'}:{})}))}catch(e){setError(e.message)}finally{setBusy(false)}}
  async function inspect(id){setBusy(true);setError('');try{setDetail(await request({claim_id:String(id)}))}catch(e){setError(e.message)}finally{setBusy(false)}}
  const actions=(detail?.allowed_message_recipients||[]).join(', ')||'nenhum envio autorizado agora';
  return <section className="card" style={{marginTop:16}}>
-  <h2>Central de reclamações • Mercado Livre</h2>
+  <h2>Central de reclamações • Mercado Livre</h2><div role="tablist" aria-label="Filtrar reclamações" style={{display:"flex",gap:8,margin:"12px 0"}}><button type="button" role="tab" aria-selected={filter==="all"} className={filter==="all"?"":"secondary"} onClick={()=>{setFilter("all");setList(null);setDetail(null)}}>Todas as reclamações</button><button type="button" role="tab" aria-selected={filter==="unanswered"} className={filter==="unanswered"?"":"secondary"} onClick={()=>{setFilter("unanswered");setList(null);setDetail(null)}}>Sem resposta</button></div>
   <p>Consulta autenticada e somente leitura. As mensagens não são enviadas automaticamente.</p>
   <div className="actions" style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
    <label>Conta <select value={selected} onChange={e=>{setSeller(e.target.value);setList(null);setDetail(null)}}>{stores.map(x=><option key={x.seller_id} value={String(x.seller_id)}>Vendedor {x.seller_id}</option>)}</select></label>
-   <label>Situação <select value={status} onChange={e=>setStatus(e.target.value)}><option value="opened">Abertas</option><option value="closed">Encerradas</option></select></label>
-   <button type="button" disabled={busy||!selected||!token} onClick={load}>{busy?'Consultando...':'Consultar reclamações na API'}</button>
+   {filter==="all"&&<label>Situação <select value={status} onChange={e=>setStatus(e.target.value)}><option value="opened">Abertas</option><option value="closed">Encerradas</option></select></label>}
+   <button type="button" disabled={busy||!selected||!token} onClick={load}>{busy?'Consultando...':filter==='unanswered'?'Buscar sem resposta':'Consultar reclamações na API'}</button>
   </div>
   {error&&<p role="alert" className="error">Consulta não validada: {error}</p>}
-  {list&&<><p className="notice">Consulta efetiva: {new Date(list.checked_at).toLocaleString('pt-BR')} • {list.claims?.length||0} itens nesta página • origem: {list.source}</p>
-   <div className="scroll"><table><thead><tr><th>Reclamação</th><th>Pedido/Recurso</th><th>Etapa</th><th>Situação</th><th>Detalhes</th></tr></thead><tbody>
-    {(list.claims||[]).map(c=><tr key={c.id}><td>{String(c.id)}</td><td>{String(c.resource_id||'—')}</td><td>{c.stage||'—'}</td><td>{c.status||'—'}</td><td><button className="secondary" onClick={()=>inspect(c.id)} disabled={busy}>Analisar</button></td></tr>)}
-    {!list.claims?.length&&<tr><td colSpan="5">Nenhuma reclamação retornada nesta consulta. Isso não comprova inexistência de reclamações em outros filtros.</td></tr>}
+  {list&&<><p className="notice">Consulta efetiva: {new Date(list.checked_at).toLocaleString('pt-BR')} • {list.claims?.length||0} {filter==='unanswered'?'casos sem resposta identificados':'itens nesta página'} • origem: {list.source}</p>
+   {filter==="unanswered"&&<p className="notice">Foram verificadas {list.scanned||0} reclamações desta página. {list.not_verified?.length||0} casos não puderam ser classificados. Exibimos apenas casos com indício de mensagem pendente ou sem mensagem do vendedor; decisões e outras ações podem exigir atendimento mesmo sem mensagem nova.</p>}<div className="scroll"><table><thead><tr><th>Reclamação</th><th>Pedido/Recurso</th><th>Etapa</th><th>Situação</th><th>Detalhes</th></tr></thead><tbody>
+    {(list.claims||[]).map(c=><tr key={c.id}><td>{String(c.id)}</td><td>{String(c.resource_id||'—')}</td><td>{c.stage||'—'}</td><td>{filter==="unanswered"?(c.response_state==="resposta_pendente"?"Resposta pendente":"Sem mensagem do vendedor"):(c.status||"—")}</td><td><button className="secondary" onClick={()=>inspect(c.id)} disabled={busy}>Analisar</button></td></tr>)}
+    {!list.claims?.length&&<tr><td colSpan="5">Nenhum caso correspondente nesta página consultada. Isso não comprova inexistência de pendências em outras páginas ou ações.</td></tr>}
    </tbody></table></div>
   </>}
   {detail&&<div className="card" style={{marginTop:16,padding:16}}>
