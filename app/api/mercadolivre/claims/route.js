@@ -41,6 +41,33 @@ export async function GET(req){
   const qs=new URLSearchParams({'players.user_id':sellerId,'players.role':'respondent',status,limit:String(limit),offset:String(offset),sort:'last_updated:desc'});
   const found=await claimGet('/post-purchase/v1/claims/search?'+qs.toString(),c.accessToken);
   if(!Array.isArray(found.data))throw Error('Resposta inesperada do Mercado Livre');
+  if(p.get('filter')==='responsibility'){
+   // A responsabilidade vigente é fornecida pelo endpoint /detail do Mercado Livre.
+   // available_actions, status e etapa NÃO substituem action_responsible.
+   const inspected=[];
+   for(let start=0;start<found.data.length;start+=6){
+    const batch=found.data.slice(start,start+6);
+    inspected.push(...await Promise.all(batch.map(async x=>{
+      const base={id:x.id,resource_id:x.resource_id,stage:x.stage,status:x.status,
+        last_updated:x.last_updated,date_created:x.date_created,reason_id:x.reason_id};
+      try{
+       const detail=await claimGet('/post-purchase/v1/claims/'+encodeURIComponent(String(x.id))+'/detail',c.accessToken);
+       const responsible=detail?.action_responsible;
+       const group=responsible==='respondent'?'seller':responsible==='complainant'?'buyer':responsible==='mediator'?'meli':'unknown';
+       return {...base,responsibility:group,action_responsible:responsible||null,
+        due_date:detail?.due_date||null,detail_title:detail?.title||null,
+        problem:detail?.problem||null,description:detail?.description||null};
+      }catch{return {...base,responsibility:'unknown',action_responsible:null,detail_unavailable:true};}
+    })));
+   }
+   const counts={seller:0,buyer:0,meli:0,unknown:0};
+   for(const x of inspected)counts[x.responsibility]++;
+   return Response.json({seller_id:sellerId,filter:'responsibility',status,
+      claims:inspected,counts,scanned:inspected.length,paging:found.paging||{},
+      source:'mercadolivre_live',checked_at:new Date().toISOString(),
+      notice:'Responsável conforme /claims/{id}/detail. Contadores apenas das reclamações desta página; não equivalem necessariamente aos cartões do site Mercado Livre. Casos sem detalhe permanecem em A verificar.'},
+      {headers:{'Cache-Control':'no-store'}});
+  }
   if(p.get('filter')==='unanswered'){
    // Inspeciona a última interação de cada reclamação; não interpreta "aberta" como "sem resposta".
    const inspected=[];
