@@ -35,7 +35,7 @@ function casePrompt(d,caseRow,sellerId){
  return 'JARVIS, ANALISAR RECLAMAÇÃO REAL DO MERCADO LIVRE. Seguem dados consultados via Concilia. Examine o motivo, histórico e prazo, identifique provas necessárias, possíveis argumentos para revisão da reputação, riscos e prepare resposta ao comprador e defesa ao ML. Não invente fotos, fatos ou exclusão da reputação. Não envie nada ao ML sem minha autorização individual. Se dados estiverem ausentes, indique. Dados JSON:\n'+JSON.stringify(payload,null,2);
 }
 export default function ClaimsPanel({token,stores=[]}){
- const [seller,setSeller]=useState(''),[view,setView]=useState('seller'),[status,setStatus]=useState('opened');
+ const [seller,setSeller]=useState(''),[view,setView]=useState('all'),[status,setStatus]=useState('all'),[loadingInfo,setLoadingInfo]=useState('');
  const [list,setList]=useState(null),[detail,setDetail]=useState(null),[caseText,setCaseText]=useState(''),[caseInfo,setCaseInfo]=useState('');
  const [error,setError]=useState(''),[busy,setBusy]=useState(false);
  const detailRef=useRef(null);
@@ -47,10 +47,39 @@ export default function ClaimsPanel({token,stores=[]}){
   return data;
  }
  async function load(){
-  setBusy(true);setError('');setDetail(null);setCaseText('');setCaseInfo('');
-  try{setList(await request({status,limit:'100',filter:'responsibility'}))}
-  catch(e){setError(e.message)}
-  finally{setBusy(false)}
+  setBusy(true);setError('');setDetail(null);setCaseText('');setCaseInfo('');setLoadingInfo('Iniciando consulta...');
+  let combined=[],scanned=0,complete=true,errors=[];
+  const statuses=status==='all'?['opened','closed']:[status];
+  const counts={seller:0,buyer:0,meli:0,unknown:0,closed:0};
+  try{
+   for(const state of statuses){
+    let offset=0,pages=0,more=true;
+    while(more && pages<102){
+     const limit=99;
+     if(offset+limit>=10000){complete=false;errors.push('Limite técnico de 9.999 registros por situação; utilize uma janela de datas para consultar volumes superiores.');break;}
+     setLoadingInfo('Consultando '+(state==='opened'?'abertas':'encerradas')+' — '+offset+' registros já processados...');
+     let data;
+     try{data=await request({status:state,limit:String(limit),offset:String(offset),...(state==='opened'?{filter:'responsibility'}:{})});}
+     catch(e){complete=false;errors.push('Erro em '+state+' na página '+(pages+1)+': '+e.message);break;}
+     let items=(data.claims||[]).map(x=>state==='closed'?{...x,responsibility:'closed'}:x);
+     // Reconsulta paginada com remoção de repetições eventuais entre páginas.
+     const existing=new Set(combined.map(x=>String(x.id)));
+     combined.push(...items.filter(x=>!existing.has(String(x.id))));
+     scanned+=items.length;
+     for(const item of items)counts[item.responsibility in counts?item.responsibility:'unknown']++;
+     const total=Number(data.paging?.total);
+     offset+=items.length;pages++;
+     more=items.length===limit && (!Number.isFinite(total)||total<=0||offset<total);
+     setList({claims:[...combined],counts:{...counts},scanned:combined.length,status,source:'mercadolivre_live',checked_at:data.checked_at,complete:false});
+     if(!items.length)break;
+     // Evita travar a interface e permite acompanhar o progresso.
+     await new Promise(resolve=>setTimeout(resolve,25));
+    }
+   }
+   setList(x=>({...x,claims:combined,counts,scanned:combined.length,status,complete,checked_at:new Date().toISOString()}));
+   if(errors.length)setError('Consulta parcial: '+errors.join(' '));
+  }catch(e){setError('Falha na consulta: '+e.message)}
+  finally{setBusy(false);setLoadingInfo('')}
  }
  async function inspect(row){
   if(busy)return;
@@ -83,23 +112,24 @@ export default function ClaimsPanel({token,stores=[]}){
   <p>Clique em <strong>Analisar no ChatGPT</strong> para consultar a reclamação e abrir esta conversa. As respostas nunca são enviadas ao Mercado Livre sem sua aprovação.</p>
   <div className="actions" style={{display:'flex',gap:12,flexWrap:'wrap',alignItems:'end',margin:'16px 0'}}>
     <label>Conta Mercado Livre <select value={selected} onChange={e=>{setSeller(e.target.value);setList(null);setDetail(null);setCaseText('')}}>{stores.map(x=><option key={x.seller_id} value={String(x.seller_id)}>Vendedor {x.seller_id}</option>)}</select></label>
-    <label>Situação <select value={status} onChange={e=>{setStatus(e.target.value);setList(null);setDetail(null);setCaseText('')}}><option value="opened">Abertas</option><option value="closed">Encerradas</option></select></label>
+    <label>Situação <select value={status} onChange={e=>{setStatus(e.target.value);setList(null);setDetail(null);setCaseText('')}}><option value="all">Todas (abertas + encerradas)</option><option value="opened">Somente abertas</option><option value="closed">Somente encerradas</option></select></label>
     <button type="button" disabled={busy||!selected||!token} onClick={load}>{busy?'Consultando...':'Atualizar reclamações'}</button>
   </div>
-  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:12,margin:'16px 0'}}>
+  {loadingInfo&&<p role="status" className="notice">{loadingInfo} • {list?.scanned||0} carregadas até agora.</p>}\n  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:12,margin:'16px 0'}}>
    {GROUPS.map(g=><button key={g.id} type="button" onClick={()=>{setView(g.id);setDetail(null);setCaseText('')}} aria-pressed={view===g.id} style={{textAlign:'left',border:'1px solid '+(view===g.id?g.color:'#dbe1e9'),borderLeft:'4px solid '+g.color,background:view===g.id?'#f7f9fc':'#fff',borderRadius:10,padding:16,color:'#1e293b',minHeight:118,boxShadow:view===g.id?'0 3px 9px #00000012':'none'}}>
       <span style={{display:'block',fontWeight:700,fontSize:14}}>{g.title}</span>
       <strong style={{fontSize:30,display:'block',margin:'7px 0 1px',color:g.color}}>{count(g.id)}</strong>
       <small style={{fontSize:12,color:'#64748b'}}>{g.subtitle}</small>
     </button>)}
+   <button type="button" onClick={()=>{setView('closed');setDetail(null);setCaseText('')}} aria-pressed={view==='closed'} style={{textAlign:'left',border:'1px solid #dbe1e9',borderLeft:'4px solid #15803d',background:view==='closed'?'#f7f9fc':'#fff',borderRadius:10,padding:16,color:'#1e293b',minHeight:118}}><span style={{display:'block',fontWeight:700,fontSize:14}}>Encerradas</span><strong style={{fontSize:30,display:'block',color:'#15803d',margin:'7px 0'}}>{count('closed')}</strong><small style={{fontSize:12,color:'#64748b'}}>Histórico da conta</small></button>
   </div>
   <div style={{display:'flex',gap:9,alignItems:'center',flexWrap:'wrap',margin:'12px 0'}}>
-    <button type="button" className={view==='all'?'':'secondary'} onClick={()=>setView('all')}>Todas as abertas ({list?.scanned??'—'})</button>
+    <button type="button" className={view==='all'?'':'secondary'} onClick={()=>setView('all')}>Todas as reclamações ({list?.scanned??'—'})</button>
     <small style={{color:'#64748b'}}>Contadores desta consulta; podem diferir dos totais do painel oficial.</small>
   </div>
   {caseInfo&&<p role="status" className="notice" style={{fontWeight:600}}>{caseInfo}</p>}
   {error&&<p role="alert" className="error">{error}</p>}
-  {list&&<><p className="notice">Consulta: {formatDate(list.checked_at)} • {list.scanned} reclamações examinadas • fonte: {list.source}.</p>
+  {list&&<><p className="notice">Consulta: {formatDate(list.checked_at)} • {list.scanned} reclamações carregadas • fonte: {list.source} • {list.complete?'Consulta finalizada':'Consulta parcial ou em andamento'}.</p>
    <div className="scroll"><table><thead><tr><th>Reclamação</th><th>Pedido / Recurso</th><th>Etapa</th><th>Responsável</th><th>Prazo</th><th>Análise</th></tr></thead>
    <tbody>{rows.map(c=><tr key={c.id}>
     <td>{String(c.id)}</td><td>{String(c.resource_id||'—')}</td><td>{c.stage||'—'}</td>
