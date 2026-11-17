@@ -64,11 +64,29 @@ export async function GET(req){
    if(order&&String(order.seller?.id)!==String(sellerId)){
      return Response.json({error:'Pedido vinculado a outra conta vendedora. Confira a conta selecionada no Concilia.',code:'ORDER_SELLER_MISMATCH'}, {status:409});
    }
-   // order_id é o filtro oficial que agrega recursos relacionados ao pedido.
-   // A segunda busca cobre casos vinculados diretamente ao recurso order.
+   // Uma venda exibida na interface pode remeter ao ID do pack, não ao pedido individual.
+   // Consultar pack e seus pedidos relacionados, sem assumir identidade entre os IDs.
+   let pack=null,packLookupError=null;
+   if(!order)try{pack=await meli('/packs/'+encodeURIComponent(searchedOrder),c.accessToken)}
+   catch(e){packLookupError=e.message||'Pacote não disponível';}
+   const packOrders=Array.isArray(pack?.orders)?pack.orders.map(x=>String(x.id)).filter(digits).slice(0,30):[];
+   const verifiedPackOrders=[];
+   for(const id of packOrders){
+     try{
+       const o=await meli('/orders/'+encodeURIComponent(id),c.accessToken);
+       if(String(o.seller?.id)===String(sellerId))verifiedPackOrders.push({
+         id:String(o.id),status:o.status||null,items:(o.order_items||[]).slice(0,12).map(x=>({title:String(x.item?.title||'').slice(0,180),quantity:x.quantity||null}))
+       });
+     }catch{}
+   }
+   if(pack && packOrders.length && verifiedPackOrders.length===0){
+     return Response.json({error:'Foi identificado um pack, mas nenhum pedido do pacote foi validado como pertencente à conta selecionada.',code:'PACK_ORDER_NOT_VERIFIED',pack_found:true},{status:409});
+   }
    const searches=[
      {kind:'order_id',query:new URLSearchParams({order_id:searchedOrder,limit:'100',offset:'0'})},
-     {kind:'resource',query:new URLSearchParams({resource:'order',resource_id:searchedOrder,limit:'100',offset:'0'})}
+     {kind:'resource',query:new URLSearchParams({resource:'order',resource_id:searchedOrder,limit:'100',offset:'0'})},
+     {kind:'pack_id',query:new URLSearchParams({pack_id:searchedOrder,limit:'100',offset:'0'})},
+     ...verifiedPackOrders.map(o=>({kind:'pack_order_'+o.id,query:new URLSearchParams({order_id:o.id,limit:'100',offset:'0'})}))
    ];
    const results=await Promise.allSettled(searches.map(async ({kind,query})=>{
      const response=await claimGet('/post-purchase/v1/claims/search?'+query,c.accessToken);
@@ -122,9 +140,9 @@ export async function GET(req){
    inspected.sort((a,b)=>Date.parse(b.last_updated||0)-Date.parse(a.last_updated||0));
    return Response.json({
      seller_id:sellerId,order_id:searchedOrder,
-     order:order?{id:String(order.id),status:order.status||null,items:(order.order_items||[]).slice(0,20).map(x=>({title:String(x.item?.title||'').slice(0,180),quantity:x.quantity||null}))}:null,
+     order:order?{id:String(order.id),status:order.status||null,items:(order.order_items||[]).slice(0,20).map(x=>({title:String(x.item?.title||'').slice(0,180),quantity:x.quantity||null}))}:verifiedPackOrders[0]||null,
      claims:inspected,
-     diagnostics:{order_found:!!order,order_lookup_error:orderLookupError,order_in_concilia:orderInConcilia,searches:successes.map(x=>({source:x.kind,count:x.data.length,paging:x.paging})),search_errors:failures,unverified_or_other_seller:accountMismatch.length,raw_matched_claims:items.length,complete:failures.length===0&&successes.every(x=>x.data.length<100)},
+     diagnostics:{order_found:!!order,order_lookup_error:orderLookupError,pack_found:!!pack,pack_lookup_error:packLookupError,pack_orders:verifiedPackOrders.map(o=>o.id),order_in_concilia:orderInConcilia,searches:successes.map(x=>({source:x.kind,count:x.data.length,paging:x.paging})),search_errors:failures,unverified_or_other_seller:accountMismatch.length,raw_matched_claims:items.length,complete:failures.length===0&&successes.every(x=>x.data.length<100)},
      source:'mercadolivre_live',checked_at:new Date().toISOString(),
      notice:'Reputação é um indicador separado: a API de reclamações pode não refletir todos os problemas de reputação. Confirme a conta vendedora e utilize o painel oficial para impacto e exclusão.'
    },{headers:{'Cache-Control':'no-store'}});
