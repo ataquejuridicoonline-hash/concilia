@@ -53,6 +53,38 @@ export async function GET(req){
      notice:'Dados do pedido e envio limitados. Comprovantes e fotos precisam ser apresentados separadamente.'},
      {headers:{'Cache-Control':'no-store'}});
   }
+  // Busca direta por ID do pedido, independente da paginação ou status das listas.
+  const searchedOrder=p.get('order_id');
+  if(searchedOrder!==null){
+   if(!digits(searchedOrder))return Response.json({error:'Informe um número de pedido válido (somente dígitos)'},{status:400});
+   // Confirmar que a venda pertence ao vendedor conectado antes de retornar reclamações.
+   const order=await meli('/orders/'+encodeURIComponent(searchedOrder),c.accessToken).catch(()=>null);
+   if(!order||String(order.seller?.id)!==String(sellerId)){
+    return Response.json({error:'Pedido não encontrado nesta conta vendedora ou sem permissão de acesso'},{status:404});
+   }
+   const qs=new URLSearchParams({order_id:searchedOrder,limit:'100',offset:'0'});
+   const found=await claimGet('/post-purchase/v1/claims/search?'+qs.toString(),c.accessToken);
+   if(!Array.isArray(found.data))throw Error('Resposta inesperada da busca por pedido');
+   const items=found.data.filter(x=>(x.players||[]).some(t=>t.role==='respondent'&&String(t.user_id)===String(sellerId)));
+   const inspected=[];
+   for(let i=0;i<items.length;i+=6){
+    inspected.push(...await Promise.all(items.slice(i,i+6).map(async x=>{
+     const base={id:x.id,resource_id:x.resource_id,stage:x.stage,status:x.status,
+       reason_id:x.reason_id,last_updated:x.last_updated,date_created:x.date_created};
+     try{
+      const detail=await claimGet('/post-purchase/v1/claims/'+encodeURIComponent(String(x.id))+'/detail',c.accessToken);
+      const role=detail?.action_responsible;
+      const group=['respondent','seller'].includes(role)?'seller':['complainant','buyer'].includes(role)?'buyer':['mediator','mercadolibre','mercado_libre'].includes(role)?'meli':'unknown';
+      return {...base,responsibility:x.status==='closed'?'closed':group,action_responsible:role||null,due_date:detail?.due_date||null};
+     }catch{return {...base,responsibility:x.status==='closed'?'closed':'unknown',action_responsible:null,due_date:null};}
+    })));
+   }
+   return Response.json({seller_id:sellerId,order_id:searchedOrder,
+     order:{id:String(order.id),status:order.status||null,items:(order.order_items||[]).slice(0,20).map(x=>({title:x.item?.title||'',quantity:x.quantity||null}))},
+     claims:inspected,paging:found.paging||{},source:'mercadolivre_live',checked_at:new Date().toISOString(),
+     notice:'Busca pelo order_id na API oficial, inclui reclamações abertas e encerradas. A ausência de reclamação não confirma ausência de devoluções ou mensagens fora do fluxo de claims.'},
+     {headers:{'Cache-Control':'no-store'}});
+  }
   const status=p.get('status')||'opened',limit=Number(p.get('limit')||30),offset=Number(p.get('offset')||0);
   if(!['opened','closed'].includes(status)||!Number.isInteger(limit)||limit<1||limit>100||!Number.isInteger(offset)||offset<0||offset+limit>=10000)return Response.json({error:'Filtros ou paginação inválidos'},{status:400});
   const qs=new URLSearchParams({'players.user_id':sellerId,'players.role':'respondent',status,limit:String(limit),offset:String(offset),sort:'last_updated:desc'});
