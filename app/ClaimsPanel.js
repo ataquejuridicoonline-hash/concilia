@@ -84,7 +84,7 @@ export default function ClaimsPanel({token,stores=[]}){
  }
  async function searchOrder(e){
   e.preventDefault();
-  const number=orderQuery.replace(/\\s+/g,'');
+  const number=orderQuery.trim();
   setOrderError('');setOrderResult(null);setDetail(null);setCaseText('');setCaseInfo('');
   if(!/^[0-9]{1,20}$/.test(number)){setOrderError('Digite um número de pedido válido, somente números.');return;}
   setOrderBusy(true);
