@@ -32,9 +32,26 @@ export async function GET(req){
    const base='/post-purchase/v1/claims/'+encodeURIComponent(claimId);
    const claim=await claimGet(base,c.accessToken);
    if(!(claim.players||[]).some(x=>String(x.user_id)===String(sellerId)&&x.role==='respondent'))return Response.json({error:'Reclamação não pertence a esta conta'},{status:403});
-   const optional=await Promise.allSettled([claimGet(base+'/messages',c.accessToken),claimGet(base+'/actions-history',c.accessToken),claim.reason_id?claimGet('/post-purchase/v1/claims/reasons/'+encodeURIComponent(String(claim.reason_id)),c.accessToken):Promise.resolve(null)]);
-   const [messages,history,reason]=optional.map(x=>x.status==='fulfilled'?x.value:null);
-   return Response.json({seller_id:sellerId,claim, messages,actions_history:history, reason,analysis:classify(messages,reason),allowed_message_recipients:['complainant','mediator'].filter(role=>available(claim,sellerId,'send_message_to_'+role)),source:'mercadolivre_live',checked_at:new Date().toISOString()},{headers:{'Cache-Control':'no-store'}});
+   const orderId=String(claim.resource_id||'');
+   const safeOrder=digits(orderId)?meli('/orders/'+encodeURIComponent(orderId),c.accessToken).then(order=>({
+     id:String(order.id),status:order.status||null,
+     items:(Array.isArray(order.order_items)?order.order_items:[]).slice(0,15).map(x=>({title:String(x.item?.title||'').slice(0,180),quantity:x.quantity||null})),
+     shipping:order.shipping?.id?{shipment_id:String(order.shipping.id)}:null
+   })).catch(()=>null):Promise.resolve(null);
+   const optional=await Promise.allSettled([
+     claimGet(base+'/messages',c.accessToken),
+     claimGet(base+'/actions-history',c.accessToken),
+     claim.reason_id?claimGet('/post-purchase/v1/claims/reasons/'+encodeURIComponent(String(claim.reason_id)),c.accessToken):Promise.resolve(null),
+     claimGet(base+'/detail',c.accessToken),
+     safeOrder
+   ]);
+   const [messages,history,reason,claimDetail,order]=optional.map(x=>x.status==='fulfilled'?x.value:null);
+   const messageList=Array.isArray(messages)?messages:Array.isArray(messages?.messages)?messages.messages:Array.isArray(messages?.data)?messages.data:[];
+   return Response.json({seller_id:sellerId,claim,claim_detail:claimDetail,order,messages,actions_history:history,reason,
+     analysis:classify(messageList,reason),allowed_message_recipients:['complainant','mediator'].filter(role=>available(claim,sellerId,'send_message_to_'+role)),
+     source:'mercadolivre_live',checked_at:new Date().toISOString(),
+     notice:'Dados do pedido e envio limitados. Comprovantes e fotos precisam ser apresentados separadamente.'},
+     {headers:{'Cache-Control':'no-store'}});
   }
   const status=p.get('status')||'opened',limit=Number(p.get('limit')||30),offset=Number(p.get('offset')||0);
   if(!['opened','closed'].includes(status)||!Number.isInteger(limit)||limit<1||limit>100||!Number.isInteger(offset)||offset<0||offset+limit>=10000)return Response.json({error:'Filtros ou paginação inválidos'},{status:400});
