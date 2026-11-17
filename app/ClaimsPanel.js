@@ -38,6 +38,7 @@ export default function ClaimsPanel({token,stores=[]}){
  const [seller,setSeller]=useState(''),[view,setView]=useState('all'),[status,setStatus]=useState('all'),[loadingInfo,setLoadingInfo]=useState('');
  const [list,setList]=useState(null),[detail,setDetail]=useState(null),[caseText,setCaseText]=useState(''),[caseInfo,setCaseInfo]=useState('');
  const [error,setError]=useState(''),[busy,setBusy]=useState(false);
+ const [orderQuery,setOrderQuery]=useState(''),[orderResult,setOrderResult]=useState(null),[orderError,setOrderError]=useState(''),[orderBusy,setOrderBusy]=useState(false);
  const detailRef=useRef(null);
  const selected=seller||String(stores[0]?.seller_id||'');
  async function request(params){
@@ -81,6 +82,16 @@ export default function ClaimsPanel({token,stores=[]}){
   }catch(e){setError('Falha na consulta: '+e.message)}
   finally{setBusy(false);setLoadingInfo('')}
  }
+ async function searchOrder(e){
+  e.preventDefault();
+  const number=orderQuery.replace(/\\s+/g,'');
+  setOrderError('');setOrderResult(null);setDetail(null);setCaseText('');setCaseInfo('');
+  if(!/^[0-9]{1,20}$/.test(number)){setOrderError('Digite um número de pedido válido, somente números.');return;}
+  setOrderBusy(true);
+  try{setOrderResult(await request({order_id:number}))}
+  catch(e){setOrderError(e.message)}
+  finally{setOrderBusy(false)}
+ }
  async function inspect(row){
   if(busy)return;
   // Abrir imediatamente a conversa na ação do clique, evitando bloqueio de pop-ups.
@@ -115,6 +126,24 @@ export default function ClaimsPanel({token,stores=[]}){
     <label>Situação <select value={status} onChange={e=>{setStatus(e.target.value);setList(null);setDetail(null);setCaseText('')}}><option value="all">Todas (abertas + encerradas)</option><option value="opened">Somente abertas</option><option value="closed">Somente encerradas</option></select></label>
     <button type="button" disabled={busy||!selected||!token} onClick={load}>{busy?'Consultando...':'Atualizar reclamações'}</button>
   </div>
+  <form onSubmit={searchOrder} style={{padding:16,border:'1px solid #dbe1e9',borderRadius:10,margin:'14px 0',background:'#f9fafb'}}>
+   <label htmlFor="ml-order-search" style={{display:'block',fontWeight:700,marginBottom:8}}>Buscar reclamações pelo número do pedido</label>
+   <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+    <input id="ml-order-search" type="text" inputMode="numeric" pattern="[0-9]*" placeholder="Ex.: 2000019511061200" value={orderQuery} onChange={e=>setOrderQuery(e.target.value)} style={{flex:'1 1 230px',minWidth:180}} disabled={orderBusy}/>
+    <button type="submit" disabled={orderBusy||!selected||!token}>{orderBusy?'Pesquisando...':'Buscar pedido'}</button>
+    <button type="button" className="secondary" onClick={()=>{setOrderQuery('');setOrderResult(null);setOrderError('')}} disabled={orderBusy}>Limpar busca</button>
+   </div>
+   <small style={{color:'#64748b'}}>Busca diretamente na API por order_id, incluindo reclamações abertas e encerradas, sem carregar o histórico completo.</small>
+   {orderError&&<p className="error" role="alert" style={{marginTop:10}}>{orderError}</p>}
+   {orderResult&&<div style={{marginTop:14}}>
+    <strong>Pedido #{orderResult.order_id}</strong> • {orderResult.claims?.length||0} reclamação(ões) encontrada(s) • {orderResult.order?.status||'status não disponível'}
+    {orderResult.order?.items?.length>0&&<p style={{margin:'7px 0',color:'#475569'}}>{orderResult.order.items.map(x=>x.title).join(' / ')}</p>}
+    <div className="scroll"><table><thead><tr><th>Reclamação</th><th>Status</th><th>Responsável</th><th>Última atualização</th><th>Análise</th></tr></thead><tbody>
+     {(orderResult.claims||[]).map(c=><tr key={c.id}><td>{String(c.id)}</td><td>{c.status||'—'}</td><td>{GROUPS.find(g=>g.id===c.responsibility)?.title||(c.responsibility==='closed'?'Encerrada':'A verificar')}</td><td>{formatDate(c.last_updated)}</td><td><button type="button" className="secondary" disabled={busy} onClick={()=>inspect({...c,resource_id:orderResult.order_id})}>Analisar no ChatGPT</button></td></tr>)}
+     {!orderResult.claims?.length&&<tr><td colSpan="5">Pedido localizado, sem reclamações retornadas na API.</td></tr>}
+    </tbody></table></div>
+   </div>}
+  </form>
   {loadingInfo&&<p role="status" className="notice">{loadingInfo} • {list?.scanned||0} carregadas até agora.</p>}
   <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:12,margin:'16px 0'}}>
    {GROUPS.map(g=><button key={g.id} type="button" onClick={()=>{setView(g.id);setDetail(null);setCaseText('')}} aria-pressed={view===g.id} style={{textAlign:'left',border:'1px solid '+(view===g.id?g.color:'#dbe1e9'),borderLeft:'4px solid '+g.color,background:view===g.id?'#f7f9fc':'#fff',borderRadius:10,padding:16,color:'#1e293b',minHeight:118,boxShadow:view===g.id?'0 3px 9px #00000012':'none'}}>
