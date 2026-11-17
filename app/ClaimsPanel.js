@@ -141,10 +141,13 @@ export default function ClaimsPanel({token,stores=[]}){
     {orderResult.diagnostics&&<div style={{padding:12,margin:'10px 0',border:'1px solid #dce2e9',background:'#fff',borderRadius:8}}>
      <strong>Diagnóstico da integração para este pedido</strong>
      <p style={{margin:'7px 0'}}>Pedido acessível na API de pedidos: <strong>{orderResult.diagnostics.order_found?'Sim':'Não'}</strong></p>
+     <p style={{margin:'7px 0'}}>Identificador reconhecido como pacote (pack): <strong>{orderResult.diagnostics.pack_found?'Sim':'Não'}</strong></p>
+     {orderResult.diagnostics.pack_orders?.length>0&&<p style={{margin:'7px 0'}}>Pedidos vinculados confirmados: {orderResult.diagnostics.pack_orders.join(', ')}</p>}
      <p style={{margin:'7px 0'}}>Pedido localizado entre os pedidos já importados no Concilia: <strong>{orderResult.diagnostics.order_in_concilia?.found?'Sim':orderResult.diagnostics.order_in_concilia?.available===false?'Consulta local indisponível':'Não'}</strong></p>
      {orderResult.diagnostics.order_in_concilia?.connected_sellers?.length>0&&<p style={{margin:'7px 0'}}>Conta(s) em que foi encontrado: {orderResult.diagnostics.order_in_concilia.connected_sellers.join(', ')}</p>}
      <p style={{margin:'7px 0'}}>Reclamações encontradas: <strong>{orderResult.diagnostics.raw_matched_claims}</strong> • não confirmadas nesta conta: {orderResult.diagnostics.unverified_or_other_seller}</p>
-     {!orderResult.diagnostics.order_found&&!orderResult.diagnostics.raw_matched_claims&&<p style={{margin:'8px 0',fontWeight:600,color:'#b45309'}}>O Mercado Livre não disponibilizou o pedido nem a reclamação para a conta selecionada. Verifique se a venda pertence ao vendedor indicado acima; se pertencer, será necessário investigar as permissões de acesso ou obter o ID direto da reclamação no Mercado Livre.</p>}
+     {!orderResult.diagnostics.order_found&&!orderResult.diagnostics.pack_found&&!orderResult.diagnostics.raw_matched_claims&&<p style={{margin:'8px 0',fontWeight:600,color:'#b45309'}}>O Mercado Livre não disponibilizou o pedido nem a reclamação para a conta selecionada. Verifique se a venda pertence ao vendedor indicado acima; se pertencer, será necessário investigar as permissões de acesso ou obter o ID direto da reclamação no Mercado Livre.</p>}
+     {orderResult.diagnostics.pack_lookup_error&&<small style={{display:'block'}}>Consulta de pack: {orderResult.diagnostics.pack_lookup_error}</small>}
      {orderResult.diagnostics.order_lookup_error&&<small style={{display:'block'}}>Consulta de pedidos: {orderResult.diagnostics.order_lookup_error}</small>}
      {orderResult.diagnostics.search_errors?.length>0&&<small style={{display:'block'}}>Atenção: consulta de reclamações parcial.</small>}
     </div>}
