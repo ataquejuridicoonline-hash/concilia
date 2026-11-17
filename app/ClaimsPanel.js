@@ -138,7 +138,16 @@ export default function ClaimsPanel({token,stores=[]}){
    {orderResult&&<div style={{marginTop:14}}>
     <strong>Pedido #{orderResult.order_id}</strong> • {orderResult.claims?.length||0} reclamação(ões) encontrada(s) • {orderResult.order?.status||'pedido indisponível na consulta de pedidos'}
     {orderResult.order?.items?.length>0&&<p style={{margin:'7px 0',color:'#475569'}}>{orderResult.order.items.map(x=>x.title).join(' / ')}</p>}
-    {orderResult.diagnostics&&<p className="notice" style={{margin:'8px 0'}}>API: {orderResult.diagnostics.raw_matched_claims} reclamação(ões) localizadas nas buscas; {orderResult.diagnostics.unverified_or_other_seller} não confirmadas nesta conta. {orderResult.diagnostics.search_errors?.length?'Atenção: busca parcial; verifique os detalhes técnicos abaixo.':''}</p>}
+    {orderResult.diagnostics&&<div style={{padding:12,margin:'10px 0',border:'1px solid #dce2e9',background:'#fff',borderRadius:8}}>
+     <strong>Diagnóstico da integração para este pedido</strong>
+     <p style={{margin:'7px 0'}}>Pedido acessível na API de pedidos: <strong>{orderResult.diagnostics.order_found?'Sim':'Não'}</strong></p>
+     <p style={{margin:'7px 0'}}>Pedido localizado entre os pedidos já importados no Concilia: <strong>{orderResult.diagnostics.order_in_concilia?.found?'Sim':orderResult.diagnostics.order_in_concilia?.available===false?'Consulta local indisponível':'Não'}</strong></p>
+     {orderResult.diagnostics.order_in_concilia?.connected_sellers?.length>0&&<p style={{margin:'7px 0'}}>Conta(s) em que foi encontrado: {orderResult.diagnostics.order_in_concilia.connected_sellers.join(', ')}</p>}
+     <p style={{margin:'7px 0'}}>Reclamações encontradas: <strong>{orderResult.diagnostics.raw_matched_claims}</strong> • não confirmadas nesta conta: {orderResult.diagnostics.unverified_or_other_seller}</p>
+     {!orderResult.diagnostics.order_found&&!orderResult.diagnostics.raw_matched_claims&&<p style={{margin:'8px 0',fontWeight:600,color:'#b45309'}}>O Mercado Livre não disponibilizou o pedido nem a reclamação para a conta selecionada. Verifique se a venda pertence ao vendedor indicado acima; se pertencer, será necessário investigar as permissões de acesso ou obter o ID direto da reclamação no Mercado Livre.</p>}
+     {orderResult.diagnostics.order_lookup_error&&<small style={{display:'block'}}>Consulta de pedidos: {orderResult.diagnostics.order_lookup_error}</small>}
+     {orderResult.diagnostics.search_errors?.length>0&&<small style={{display:'block'}}>Atenção: consulta de reclamações parcial.</small>}
+    </div>}
     <div className="scroll"><table><thead><tr><th>Reclamação</th><th>Status</th><th>Responsável</th><th>Última atualização</th><th>Análise</th></tr></thead><tbody>
      {(orderResult.claims||[]).map(c=><tr key={c.id}><td>{String(c.id)}</td><td>{c.status||'—'}</td><td>{GROUPS.find(g=>g.id===c.responsibility)?.title||(c.responsibility==='closed'?'Encerrada':'A verificar')}</td><td>{formatDate(c.last_updated)}</td><td><button type="button" className="secondary" disabled={busy} onClick={()=>inspect({...c,resource_id:orderResult.order_id})}>Analisar no ChatGPT</button></td></tr>)}
      {!orderResult.claims?.length&&<tr><td colSpan="5">Nenhuma reclamação confirmada nesta conta pela API. Isso não significa que o pedido não afete a reputação. Confira a conta selecionada e o painel oficial de problemas em vendas.</td></tr>}
