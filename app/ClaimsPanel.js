@@ -55,7 +55,7 @@ export default function ClaimsPanel({token,stores=[]}){
  async function inspect(row){
   if(busy)return;
   // Abrir imediatamente a conversa na ação do clique, evitando bloqueio de pop-ups.
-  const tab=window.open(CHAT_URL,'_blank','noopener,noreferrer');
+  window.open(CHAT_URL,'_blank','noopener,noreferrer');
   setBusy(true);setError('');setDetail(null);setCaseText('');setCaseInfo('Buscando reclamação '+row.id+' na API...');
   try{
    const data=await request({claim_id:String(row.id)});
@@ -66,7 +66,6 @@ export default function ClaimsPanel({token,stores=[]}){
    setCaseInfo(copied
     ?'Dados da reclamação copiados. A conversa foi aberta: cole (Ctrl+V ou Cmd+V) e envie para eu analisar.'
     :'A conversa foi aberta, mas o navegador não permitiu copiar automaticamente. Clique em “Copiar análise” abaixo e cole na conversa.');
-   if(!tab) setCaseInfo('A abertura da conversa foi bloqueada. Use o botão “Abrir esta conversa”, copie os dados e cole para análise.');
    requestAnimationFrame(()=>detailRef.current?.scrollIntoView({behavior:'smooth',block:'start'}));
   }catch(e){
    setError('Não foi possível carregar a reclamação '+row.id+': '+e.message);
