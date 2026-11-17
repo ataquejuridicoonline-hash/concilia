@@ -119,11 +119,11 @@ export default function ClaimsPanel({token,stores=[]}){
  const rows=(list?.claims||[]).filter(x=>view==='all'||x.responsibility===view);
  const count=id=>list?.counts?.[id]??'—';
  return <section className="card" style={{marginTop:16}}>
-  <h2>Central de reclamações • Mercado Livre</h2>
+  <h2>Central de reclamações • Mercado Livre</h2><p style={{fontWeight:700,color:'#334155'}}>Período: últimos 60 dias (data de abertura da reclamação)</p>
   <p>Clique em <strong>Analisar no ChatGPT</strong> para consultar a reclamação e abrir esta conversa. As respostas nunca são enviadas ao Mercado Livre sem sua aprovação.</p>
   <div className="actions" style={{display:'flex',gap:12,flexWrap:'wrap',alignItems:'end',margin:'16px 0'}}>
     <label>Conta Mercado Livre <select value={selected} onChange={e=>{setSeller(e.target.value);setList(null);setDetail(null);setCaseText('')}}>{stores.map(x=><option key={x.seller_id} value={String(x.seller_id)}>Vendedor {x.seller_id}</option>)}</select></label>
-    <label>Situação <select value={status} onChange={e=>{setStatus(e.target.value);setList(null);setDetail(null);setCaseText('')}}><option value="all">Todas (abertas + encerradas)</option><option value="opened">Somente abertas</option><option value="closed">Somente encerradas</option></select></label>
+    <label>Situação <select value={status} onChange={e=>{setStatus(e.target.value);setList(null);setDetail(null);setCaseText('')}}><option value="all">Últimos 60 dias — abertas + encerradas</option><option value="opened">Últimos 60 dias — abertas</option><option value="closed">Últimos 60 dias — encerradas</option></select></label>
     <button type="button" disabled={busy||!selected||!token} onClick={load}>{busy?'Consultando...':'Atualizar reclamações'}</button>
   </div>
   <form onSubmit={searchOrder} style={{padding:16,border:'1px solid #dbe1e9',borderRadius:10,margin:'14px 0',background:'#f9fafb'}}>
@@ -133,7 +133,7 @@ export default function ClaimsPanel({token,stores=[]}){
     <button type="submit" disabled={orderBusy||!selected||!token}>{orderBusy?'Pesquisando...':'Buscar pedido'}</button>
     <button type="button" className="secondary" onClick={()=>{setOrderQuery('');setOrderResult(null);setOrderError('')}} disabled={orderBusy}>Limpar busca</button>
    </div>
-   <small style={{color:'#64748b'}}>Busca diretamente na API por order_id, incluindo reclamações abertas e encerradas, sem carregar o histórico completo.</small>
+   <small style={{color:'#64748b'}}>Pesquisa individual por pedido em qualquer data, independente do filtro de 60 dias do painel.</small>
    {orderError&&<p className="error" role="alert" style={{marginTop:10}}>{orderError}</p>}
    {orderResult&&<div style={{marginTop:14}}>
     <strong>Pedido #{orderResult.order_id}</strong> • {orderResult.claims?.length||0} reclamação(ões) encontrada(s) • {orderResult.order?.status||'pedido indisponível na consulta de pedidos'}
@@ -156,12 +156,12 @@ export default function ClaimsPanel({token,stores=[]}){
    <button type="button" onClick={()=>{setView('closed');setDetail(null);setCaseText('')}} aria-pressed={view==='closed'} style={{textAlign:'left',border:'1px solid #dbe1e9',borderLeft:'4px solid #15803d',background:view==='closed'?'#f7f9fc':'#fff',borderRadius:10,padding:16,color:'#1e293b',minHeight:118}}><span style={{display:'block',fontWeight:700,fontSize:14}}>Encerradas</span><strong style={{fontSize:30,display:'block',color:'#15803d',margin:'7px 0'}}>{count('closed')}</strong><small style={{fontSize:12,color:'#64748b'}}>Histórico da conta</small></button>
   </div>
   <div style={{display:'flex',gap:9,alignItems:'center',flexWrap:'wrap',margin:'12px 0'}}>
-    <button type="button" className={view==='all'?'':'secondary'} onClick={()=>setView('all')}>Todas as reclamações ({list?.scanned??'—'})</button>
+    <button type="button" className={view==='all'?'':'secondary'} onClick={()=>setView('all')}>Todas nos últimos 60 dias ({list?.scanned??'—'})</button>
     <small style={{color:'#64748b'}}>Contadores desta consulta; podem diferir dos totais do painel oficial.</small>
   </div>
   {caseInfo&&<p role="status" className="notice" style={{fontWeight:600}}>{caseInfo}</p>}
   {error&&<p role="alert" className="error">{error}</p>}
-  {list&&<><p className="notice">Consulta: {formatDate(list.checked_at)} • {list.scanned} reclamações carregadas • fonte: {list.source} • {list.complete?'Consulta finalizada':'Consulta parcial ou em andamento'}.</p>
+  {list&&<><p className="notice">Consulta: {formatDate(list.checked_at)} • Período de 60 dias • {list.scanned} reclamações carregadas • fonte: {list.source} • {list.complete?'Consulta finalizada':'Consulta parcial ou em andamento'}.</p>
    <div className="scroll"><table><thead><tr><th>Reclamação</th><th>Pedido / Recurso</th><th>Etapa</th><th>Responsável</th><th>Prazo</th><th>Análise</th></tr></thead>
    <tbody>{rows.map(c=><tr key={c.id}>
     <td>{String(c.id)}</td><td>{String(c.resource_id||'—')}</td><td>{c.stage||'—'}</td>
