@@ -115,7 +115,8 @@ export default function ClaimsPanel({token,stores=[]}){
     <label>Situação <select value={status} onChange={e=>{setStatus(e.target.value);setList(null);setDetail(null);setCaseText('')}}><option value="all">Todas (abertas + encerradas)</option><option value="opened">Somente abertas</option><option value="closed">Somente encerradas</option></select></label>
     <button type="button" disabled={busy||!selected||!token} onClick={load}>{busy?'Consultando...':'Atualizar reclamações'}</button>
   </div>
-  {loadingInfo&&<p role="status" className="notice">{loadingInfo} • {list?.scanned||0} carregadas até agora.</p>}\n  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:12,margin:'16px 0'}}>
+  {loadingInfo&&<p role="status" className="notice">{loadingInfo} • {list?.scanned||0} carregadas até agora.</p>}
+  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:12,margin:'16px 0'}}>
    {GROUPS.map(g=><button key={g.id} type="button" onClick={()=>{setView(g.id);setDetail(null);setCaseText('')}} aria-pressed={view===g.id} style={{textAlign:'left',border:'1px solid '+(view===g.id?g.color:'#dbe1e9'),borderLeft:'4px solid '+g.color,background:view===g.id?'#f7f9fc':'#fff',borderRadius:10,padding:16,color:'#1e293b',minHeight:118,boxShadow:view===g.id?'0 3px 9px #00000012':'none'}}>
       <span style={{display:'block',fontWeight:700,fontSize:14}}>{g.title}</span>
       <strong style={{fontSize:30,display:'block',margin:'7px 0 1px',color:g.color}}>{count(g.id)}</strong>
